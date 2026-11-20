@@ -49,6 +49,18 @@ builds and passes CI locally (`cargo test --workspace`, `cargo fmt --all --
 The `justfile` wraps the commands below: `just test`, `just fmt`, `just lint`, `just wasm`, and
 `just check` to run everything CI runs. Install [just](https://just.systems) to use it.
 
+| Recipe | What it runs |
+|---|---|
+| `just test` | `cargo test --workspace` |
+| `just test-one NAME` | Runs only tests whose name contains `NAME` |
+| `just fmt` | `cargo fmt --all` |
+| `just lint` | `cargo fmt --check` and clippy with CI's flags |
+| `just doc` | rustdoc for the workspace, with warnings as errors (matches CI's docs job) |
+| `just audit` | `cargo audit` (install with `cargo install cargo-audit --locked`) |
+| `just wasm` | Release build for the `wasm32v1-none` deployment target |
+| `just wasm-size` | Builds the contracts and prints each WASM artifact's size in bytes |
+| `just check` | `lint`, `test` and `wasm`, the same gates CI runs |
+
 ```bash
 # Run every test in the workspace (vault, stream, registry)
 cargo test
