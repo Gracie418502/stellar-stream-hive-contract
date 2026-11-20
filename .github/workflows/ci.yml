@@ -69,6 +69,24 @@ jobs:
           npx --yes markdownlint-cli2@0.24.2 "*.md" "docs/*.md"
           ".github/**/*.md" "deployments/*.md"
 
+  spell-check:
+    name: Spell check (docs and doc comments)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Collect Rust doc comments
+        run: |
+          mkdir -p "$RUNNER_TEMP/spell"
+          grep -rh '^\s*//[/!]' contracts --include='*.rs' \
+            | sed -E 's#^\s*//[/!]##' > "$RUNNER_TEMP/spell/rustdoc.txt"
+      - name: Run cspell
+        run: >
+          npx --yes cspell@10.5.2 --no-progress --config cspell.json
+          "*.md" "docs/*.md" "$RUNNER_TEMP/spell/rustdoc.txt"
+
   test:
     name: Test (native)
     runs-on: ubuntu-latest
