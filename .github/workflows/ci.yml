@@ -87,6 +87,21 @@ jobs:
           npx --yes cspell@10.5.2 --no-progress --config cspell.json
           "*.md" "docs/*.md" "$RUNNER_TEMP/spell/rustdoc.txt"
 
+  repo-hygiene:
+    name: Repo hygiene (no tracked test snapshots)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if test_snapshots/ files are tracked
+        run: |
+          tracked="$(git ls-files | grep 'test_snapshots/' || true)"
+          if [ -n "$tracked" ]; then
+            echo "::error::test_snapshots/ is gitignored; these files must not be tracked:"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "No tracked test_snapshots/ files."
+
   test:
     name: Test (native)
     runs-on: ubuntu-latest
