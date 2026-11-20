@@ -144,6 +144,20 @@ comment explaining why it doesn't apply and, if there is one, a link to an
 upstream issue tracking a real fix. Never disable or remove the audit job to
 make a failure go away.
 
+## Optional: pre-commit hooks
+
+`.pre-commit-config.yaml` runs the same `cargo fmt --check` and clippy
+commands as CI before each commit. It is opt-in and nothing enforces it:
+
+```bash
+pip install pre-commit      # or: pipx install pre-commit
+pre-commit install          # adds the git hook to this clone
+pre-commit run --all-files  # optional: run every hook once now
+```
+
+CI remains the source of truth. Skip the hook for a single commit with
+`git commit --no-verify` if you need to.
+
 ## The streaming math, explained
 
 Every stream accrues linearly between `start_ledger` and `end_ledger`:
