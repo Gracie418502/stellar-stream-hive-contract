@@ -718,3 +718,94 @@ fn test_releasing_full_balance_leaves_zero_locked() {
     assert_eq!(ctx.token.balance(&ctx.vault.address), 0);
     assert_eq!(ctx.token.balance(&recipient), 500);
 }
+
+// ---------------------------------------------------------------------
+// Solvency invariant under random operations
+// ---------------------------------------------------------------------
+
+/// Deterministic PRNG (same LCG as the stream conservation sweep) so every
+/// sequence is reproducible from its seed and needs no extra dev-dependency.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next_below(&mut self, bound: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 33) % bound
+    }
+}
+
+/// Asserts the solvency invariant at one point in a sequence: the running
+/// `total_locked` counter equals the sum of every stream's balance and the
+/// vault's actual token balance.
+fn assert_total_locked_is_backed(ctx: &TestCtx, stream_count: u64, seed: u64, step: usize) {
+    let total = ctx.vault.total_locked(&ctx.token_address);
+    let per_stream_sum: i128 = (1..=stream_count)
+        .map(|id| ctx.vault.balance_of_stream(&id))
+        .sum();
+    let vault_balance = ctx.token.balance(&ctx.vault.address);
+
+    assert_eq!(
+        total, per_stream_sum,
+        "seed {seed}, step {step}: total_locked diverged from the sum of stream balances"
+    );
+    assert_eq!(
+        total, vault_balance,
+        "seed {seed}, step {step}: total_locked diverged from the vault's token balance"
+    );
+}
+
+/// Runs `steps` random deposits, releases and refunds spread across
+/// `stream_count` streams, checking the invariant after every single step.
+fn run_random_operations(seed: u64, stream_count: u64, steps: usize) {
+    let ctx = setup();
+    let depositor = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    ctx.token_sac.mint(&depositor, &1_000_000_000_000);
+
+    let mut rng = Lcg(seed);
+
+    for step in 0..steps {
+        let stream_id = 1 + rng.next_below(stream_count);
+        let balance = ctx.vault.balance_of_stream(&stream_id);
+
+        // 0 = deposit, 1 = release, 2 = refund. Payouts need a non-zero
+        // balance, so an empty stream is funded instead.
+        let op = rng.next_below(3);
+        if op == 0 || balance == 0 {
+            let amount = 1 + rng.next_below(1_000) as i128;
+            ctx.vault
+                .deposit(&depositor, &ctx.token_address, &amount, &stream_id);
+        } else {
+            let amount = 1 + rng.next_below(balance as u64) as i128;
+            if op == 1 {
+                ctx.vault.release(
+                    &ctx.stream_contract,
+                    &recipient,
+                    &ctx.token_address,
+                    &amount,
+                    &stream_id,
+                );
+            } else {
+                ctx.vault.refund(
+                    &ctx.stream_contract,
+                    &depositor,
+                    &ctx.token_address,
+                    &amount,
+                    &stream_id,
+                );
+            }
+        }
+
+        assert_total_locked_is_backed(&ctx, stream_count, seed, step);
+    }
+}
+
+#[test]
+fn test_total_locked_matches_vault_balance_under_random_operations() {
+    for seed in [1_u64, 42, 0xDEAD_BEEF] {
+        run_random_operations(seed, 5, 300);
+    }
+}
