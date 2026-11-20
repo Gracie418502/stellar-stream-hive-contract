@@ -82,3 +82,24 @@ jobs:
               echo "| $f.wasm | $(stat -c%s "$WASM_DIR/$f.wasm") |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Checksum WASM artifacts
+        run: |
+          WASM_DIR="target/wasm32v1-none/release"
+          mkdir -p wasm-dist
+          cp "$WASM_DIR"/stellar_stream_hive_vault.wasm \
+             "$WASM_DIR"/stellar_stream_hive_stream.wasm \
+             "$WASM_DIR"/stellar_stream_hive_registry.wasm \
+             wasm-dist/
+          (cd wasm-dist && sha256sum *.wasm > SHA256SUMS)
+          cat wasm-dist/SHA256SUMS
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-artifacts
+          path: |
+            wasm-dist/stellar_stream_hive_vault.wasm
+            wasm-dist/stellar_stream_hive_stream.wasm
+            wasm-dist/stellar_stream_hive_registry.wasm
+            wasm-dist/SHA256SUMS
+          retention-days: 7
+          if-no-files-found: error
