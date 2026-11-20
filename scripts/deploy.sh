@@ -10,10 +10,18 @@
 #     (e.g. `stellar keys generate deployer --network testnet --fund`)
 #
 # Usage:
-#   scripts/deploy.sh [network] [source-identity]
+#   scripts/deploy.sh [--dry-run] [network] [source-identity]
 #
 #   scripts/deploy.sh testnet deployer
+#   scripts/deploy.sh --dry-run testnet deployer
 #   CONFIRM_MAINNET=yes scripts/deploy.sh mainnet deployer
+#
+# Options:
+#   --dry-run   Build and optimize the wasm locally, then print the planned
+#               steps and the exact `stellar` commands in order, without
+#               running any of them: no `stellar contract deploy`/`invoke`,
+#               no network calls, and no deployments/<network>.json written.
+#               Works even if the identity does not exist yet.
 #
 # Outputs:
 #   deployments/<network>.json   contract ids, wasm hashes, admin, timestamp
@@ -31,15 +39,25 @@ usage() {
   awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
 }
 
-case "${1:-}" in
-  -h | --help)
-    usage
-    exit 0
-    ;;
-esac
+DRY_RUN=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --dry-run) DRY_RUN=1 ;;
+    -*)
+      echo "error: unknown option '$arg'" >&2
+      exit 1
+      ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
 
-NETWORK="${1:-testnet}"
-SOURCE="${2:-deployer}"
+NETWORK="${POSITIONAL[0]:-testnet}"
+SOURCE="${POSITIONAL[1]:-deployer}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -62,10 +80,17 @@ fi
 command -v stellar >/dev/null 2>&1 \
   || die "the 'stellar' CLI was not found on PATH. Install it with: cargo install stellar-cli"
 
-ADMIN_ADDRESS="$(stellar keys address "$SOURCE" 2>/dev/null)" \
-  || die "identity '$SOURCE' does not exist. Create it with: stellar keys generate $SOURCE --network $NETWORK --fund"
-
-echo "== Stellar Stream Hive: deploying to '$NETWORK' as '$SOURCE' ($ADMIN_ADDRESS) =="
+if [ "$DRY_RUN" = 1 ]; then
+  # Local lookup only; fall back to a placeholder so a dry run works before
+  # the identity has been created.
+  ADMIN_ADDRESS="$(stellar keys address "$SOURCE" 2>/dev/null)" || ADMIN_ADDRESS="<admin-address-of-$SOURCE>"
+  echo "== DRY RUN: no contracts will be deployed and no network calls made =="
+  echo "== Stellar Stream Hive: would deploy to '$NETWORK' as '$SOURCE' ($ADMIN_ADDRESS) =="
+else
+  ADMIN_ADDRESS="$(stellar keys address "$SOURCE" 2>/dev/null)" \
+    || die "identity '$SOURCE' does not exist. Create it with: stellar keys generate $SOURCE --network $NETWORK --fund"
+  echo "== Stellar Stream Hive: deploying to '$NETWORK' as '$SOURCE' ($ADMIN_ADDRESS) =="
+fi
 
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -84,11 +109,19 @@ unquote() {
 invoke() {
   local id="$1"
   shift
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "[dry-run] stellar contract invoke --id $id --source $SOURCE --network $NETWORK -- $*" >&2
+    return 0
+  fi
   stellar contract invoke --id "$id" --source "$SOURCE" --network "$NETWORK" -- "$@"
 }
 
 expect_eq() {
   local what="$1" actual="$2" expected="$3"
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "[dry-run] would verify: $what == '$expected'"
+    return 0
+  fi
   if [ "$actual" != "$expected" ]; then
     die "verification failed: $what is '$actual', expected '$expected'"
   fi
@@ -131,22 +164,27 @@ STREAM_HASH="$(sha256_of "$STREAM_WASM_OPT")"
 REGISTRY_HASH="$(sha256_of "$REGISTRY_WASM_OPT")"
 
 deploy() {
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "[dry-run] stellar contract deploy --wasm $1 --source $SOURCE --network $NETWORK" >&2
+    echo "<${2}-contract-id>"
+    return 0
+  fi
   stellar contract deploy --wasm "$1" --source "$SOURCE" --network "$NETWORK"
 }
 
 echo
 echo "-- Deploying vault contract --"
-VAULT_ID="$(deploy "$VAULT_WASM_OPT")"
+VAULT_ID="$(deploy "$VAULT_WASM_OPT" vault)"
 echo "vault contract id: $VAULT_ID"
 
 echo
 echo "-- Deploying stream contract --"
-STREAM_ID="$(deploy "$STREAM_WASM_OPT")"
+STREAM_ID="$(deploy "$STREAM_WASM_OPT" stream)"
 echo "stream contract id: $STREAM_ID"
 
 echo
 echo "-- Deploying registry contract --"
-REGISTRY_ID="$(deploy "$REGISTRY_WASM_OPT")"
+REGISTRY_ID="$(deploy "$REGISTRY_WASM_OPT" registry)"
 echo "registry contract id: $REGISTRY_ID"
 
 echo
@@ -167,6 +205,13 @@ expect_eq "vault admin" "$(invoke "$VAULT_ID" get_admin | unquote)" "$ADMIN_ADDR
 expect_eq "vault trusts the stream contract" "$(invoke "$VAULT_ID" get_stream_contract | unquote)" "$STREAM_ID"
 expect_eq "registry admin" "$(invoke "$REGISTRY_ID" get_admin | unquote)" "$ADMIN_ADDRESS"
 expect_eq "stream contract starts unpaused" "$(invoke "$STREAM_ID" is_paused | unquote)" "false"
+
+if [ "$DRY_RUN" = 1 ]; then
+  echo
+  echo "== Dry run complete: nothing was deployed and deployments/$NETWORK.json was not written =="
+  echo "Planned order: deploy vault, stream, registry; initialize vault, stream, registry; verify wiring."
+  exit 0
+fi
 
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p deployments
