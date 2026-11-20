@@ -7,6 +7,14 @@ real-time payment streaming. Sister repos:
 - API/indexer: https://github.com/Stellar-Hive/stellar-stream-hive-api
 - Frontend: https://github.com/Stellar-Hive/stellar-stream-hive-frontend
 
+## Dev container (optional)
+
+`.devcontainer/devcontainer.json` gives a ready-to-code environment in
+VS Code, GitHub Codespaces, or any Dev Containers client. It installs
+`just` and the Stellar CLI and adds the `wasm32v1-none` target. The Rust
+version comes from `rust-toolchain.toml`, which rustup applies on first use.
+The steps below do the same setup by hand.
+
 ## Local dev setup
 
 1. **Install Rust via rustup**: https://rustup.rs
