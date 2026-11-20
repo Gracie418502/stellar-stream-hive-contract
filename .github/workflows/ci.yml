@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly full test run to catch drift from yanked or changed dependencies.
+  # Only the test job runs on this trigger (see the `if:` guards below).
+  # 03:17 UTC keeps clear of the audit workflow's Monday 06:00 run.
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -15,6 +20,7 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name != 'schedule'
     name: Lint (fmt, clippy)
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +40,7 @@ jobs:
           -A clippy::needless_borrows_for_generic_args
 
   docs:
+    if: github.event_name != 'schedule'
     name: Docs (rustdoc, warnings as errors)
     runs-on: ubuntu-latest
     steps:
@@ -56,6 +63,7 @@ jobs:
         run: cargo test --workspace --verbose
 
   wasm-build:
+    if: github.event_name != 'schedule'
     name: Build (wasm32v1-none)
     runs-on: ubuntu-latest
     steps:
