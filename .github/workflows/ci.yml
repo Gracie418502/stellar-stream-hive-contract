@@ -69,6 +69,29 @@ jobs:
       - name: Run workspace test suite
         run: cargo test --workspace --verbose
 
+  coverage:
+    name: Test coverage (cargo-llvm-cov, informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect coverage and write job summary
+        run: |
+          cargo llvm-cov --workspace --summary-only > coverage.txt 2>&1 || true
+          {
+            echo "### Test coverage (informational, no threshold)"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   wasm-build:
     name: Build (wasm32v1-none)
     runs-on: ubuntu-latest

@@ -119,6 +119,18 @@ or refactor — the two `-A` exemptions above are the only ones CI makes.
 using `just`, run those three by hand as spelled out above and in
 "Build, test, deploy".
 
+## Test coverage
+
+CI's `coverage` job runs [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
+over the workspace and writes a summary table to the job summary. It is
+informational only and has no threshold. To run it locally:
+
+```bash
+cargo install cargo-llvm-cov --locked
+rustup component add llvm-tools-preview
+cargo llvm-cov --workspace --summary-only
+```
+
 ## Dependency audits
 
 `cargo audit` runs on every pull request and weekly on a schedule
