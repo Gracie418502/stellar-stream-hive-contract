@@ -33,6 +33,20 @@ jobs:
           -A clippy::too_many_arguments
           -A clippy::needless_borrows_for_generic_args
 
+  unused-deps:
+    name: Unused dependencies (cargo-machete)
+    runs-on: ubuntu-latest
+    # Informational for now: cargo-machete can report false positives (e.g.
+    # deps used only via macros). Drop continue-on-error once the output is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: Find unused dependencies
+        run: cargo machete --with-metadata
+
   docs:
     name: Docs (rustdoc, warnings as errors)
     runs-on: ubuntu-latest
