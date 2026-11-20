@@ -166,6 +166,15 @@ pre-commit run --all-files  # optional: run every hook once now
 CI remains the source of truth. Skip the hook for a single commit with
 `git commit --no-verify` if you need to.
 
+`cargo deny` runs on every pull request in the same workflow
+(`.github/workflows/audit.yml`). It checks the dependency licenses, banned
+crates, and crate sources against `deny.toml`. Duplicate crate versions are
+reported as warnings and do not fail the job. To check locally, install
+`cargo-deny` and run `cargo deny check licenses bans sources`. If a new
+dependency brings in a license that is not in the `allow` list, either
+choose a different dependency or add the SPDX id to `deny.toml` with a
+comment explaining why.
+
 ## The streaming math, explained
 
 Every stream accrues linearly between `start_ledger` and `end_ledger`:
