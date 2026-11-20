@@ -49,18 +49,24 @@ die() {
   exit 1
 }
 
+command -v stellar >/dev/null 2>&1 \
+  || die "the 'stellar' CLI was not found on PATH. Install it with: cargo install stellar-cli"
+
+# Built-in networks are always accepted; any other name must be a network
+# configured in the CLI (`stellar network add`). Fail here, not mid-deploy.
 case "$NETWORK" in
   testnet | futurenet | local | mainnet) ;;
-  *) die "unknown network '$NETWORK' (expected testnet, futurenet, local or mainnet)" ;;
+  *)
+    if ! stellar network ls 2>/dev/null | awk '{ print $1 }' | grep -qx -- "$NETWORK"; then
+      die "unknown network '$NETWORK' (expected testnet, futurenet, local, mainnet, or a network configured with 'stellar network add')"
+    fi
+    ;;
 esac
 
 # Mainnet moves real funds' worth of trust; make it impossible to hit by accident.
 if [ "$NETWORK" = "mainnet" ] && [ "${CONFIRM_MAINNET:-}" != "yes" ]; then
   die "refusing to deploy to mainnet without CONFIRM_MAINNET=yes. The contracts are unaudited; see SECURITY.md."
 fi
-
-command -v stellar >/dev/null 2>&1 \
-  || die "the 'stellar' CLI was not found on PATH. Install it with: cargo install stellar-cli"
 
 ADMIN_ADDRESS="$(stellar keys address "$SOURCE" 2>/dev/null)" \
   || die "identity '$SOURCE' does not exist. Create it with: stellar keys generate $SOURCE --network $NETWORK --fund"
