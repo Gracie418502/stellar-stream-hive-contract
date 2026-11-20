@@ -4,7 +4,7 @@ use crate::types::StreamStatus;
 use crate::{StreamContract, StreamContractClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    token, Address, Env,
+    token, Address, Env, IntoVal,
 };
 
 /// A minimal stand-in for the real vault contract, used only so the stream
@@ -821,7 +821,14 @@ fn test_create_event_carries_cliff_and_cancellable() {
             .into_val(&ctx.env),
     );
 
-    assert_eq!(ctx.env.events().all(), vec![&ctx.env, expected]);
+    // The funding token transfer is also emitted during this call, so only
+    // compare the events published by the stream contract itself.
+    let stream_events = ctx
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&ctx.stream.address);
+    assert_eq!(stream_events, vec![&ctx.env, expected]);
 }
 
 #[test]
