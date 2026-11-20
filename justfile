@@ -19,5 +19,9 @@ lint:
 wasm:
     cargo build --target wasm32v1-none --release -p stellar-stream-hive-vault -p stellar-stream-hive-stream -p stellar-stream-hive-registry
 
+# Builds the contracts and prints each WASM's path, size and sha256.
+wasm-hashes:
+    scripts/build-wasm.sh
+
 # Runs everything CI runs.
 check: lint test wasm

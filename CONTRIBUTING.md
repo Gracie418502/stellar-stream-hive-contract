@@ -46,7 +46,9 @@ builds and passes CI locally (`cargo test --workspace`, `cargo fmt --all --
 
 ## Build, test, deploy
 
-The `justfile` wraps the commands below: `just test`, `just fmt`, `just lint`, `just wasm`, and
+The `justfile` wraps the commands below: `just test`, `just fmt`, `just lint`, `just wasm`,
+`just wasm-hashes` (builds the WASMs and prints each one's path, size and sha256,
+via `scripts/build-wasm.sh`), and
 `just check` to run everything CI runs. Install [just](https://just.systems) to use it.
 
 ```bash
