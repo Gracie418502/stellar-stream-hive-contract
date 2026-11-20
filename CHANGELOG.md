@@ -6,6 +6,7 @@ All notable changes to the Stellar Stream Hive contracts. Format follows
 ## [Unreleased]
 
 ### Fixed
+
 - **Stream (funds stranded on early cancel):** cancelling a stream *before its
   cliff* refunded the sender only the unstreamed remainder, yet
   `withdrawable_amount` returned 0 forever for such a stream, so the
@@ -15,6 +16,7 @@ All notable changes to the Stellar Stream Hive contracts. Format follows
   new randomized conservation test.
 
 ### Added
+
 - **Stream:** `pause` / `unpause` / `is_paused`. Pausing blocks only
   `create_stream`; withdrawals and cancellations always keep working so
   funds are never trapped.
@@ -32,6 +34,7 @@ All notable changes to the Stellar Stream Hive contracts. Format follows
 - `SECURITY.md` with a private disclosure process.
 
 ### Changed
+
 - **Toolchain / CI:** the pinned Rust version in `rust-toolchain.toml` moves
   from 1.85.0 to 1.91.0 — the floor the locked dependencies require
   (`soroban-sdk` 27.0.6 declares `rust-version = 1.91.0`) — and the file now
@@ -56,4 +59,5 @@ All notable changes to the Stellar Stream Hive contracts. Format follows
   **Breaking for event consumers** -- the API repo is updated to match.
 
 ## [0.1.0]
+
 - Initial vault, stream and registry contracts.

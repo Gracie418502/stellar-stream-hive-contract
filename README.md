@@ -10,8 +10,8 @@ general-purpose payment streams.
 This repository holds the on-chain contracts only. See the sister repos
 for the indexing API and the web frontend:
 
-- API/indexer: https://github.com/Stellar-Hive/stellar-stream-hive-api
-- Frontend: https://github.com/Stellar-Hive/stellar-stream-hive-frontend
+- API/indexer: <https://github.com/Stellar-Hive/stellar-stream-hive-api>
+- Frontend: <https://github.com/Stellar-Hive/stellar-stream-hive-frontend>
 
 ## Status
 
@@ -23,7 +23,7 @@ for the indexing API and the web frontend:
 
 Three contracts, each a workspace member under `contracts/`:
 
-```
+```text
                      ┌────────────────────┐
    create_stream     │                    │   deposit / release / refund
    withdraw          │  Stream Contract   │──────────────────────────────┐
