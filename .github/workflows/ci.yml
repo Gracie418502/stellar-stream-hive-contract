@@ -143,3 +143,51 @@ jobs:
           check stellar_stream_hive_stream 57344
           check stellar_stream_hive_registry 32768
           exit $fail
+
+  wasm-reproducible:
+    name: Reproducible WASM build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      # Builds the same commit twice, in two different directories with their
+      # own target dirs, and fails if the WASM sha256 sums differ. Differences
+      # can come from absolute paths embedded in the binary (so the two builds
+      # deliberately live at different paths), or from a different rustc or
+      # linker. The toolchain is pinned in rust-toolchain.toml and above.
+      - name: Build twice in separate directories and compare
+        run: |
+          set -euo pipefail
+          CONTRACTS="stellar_stream_hive_vault stellar_stream_hive_stream stellar_stream_hive_registry"
+          ROOT="${RUNNER_TEMP:-/tmp}/reproducible"
+          rm -rf "$ROOT"
+          for n in a b; do
+            dir="$ROOT/build-$n"
+            mkdir -p "$dir"
+            git archive HEAD | tar -x -C "$dir"
+            (
+              cd "$dir"
+              cargo build --target wasm32v1-none --release --locked \
+                -p stellar-stream-hive-vault \
+                -p stellar-stream-hive-stream \
+                -p stellar-stream-hive-registry \
+                --target-dir "$dir/target"
+            )
+          done
+          fail=0
+          for c in $CONTRACTS; do
+            ha=$(sha256sum "$ROOT/build-a/target/wasm32v1-none/release/$c.wasm" | cut -d' ' -f1)
+            hb=$(sha256sum "$ROOT/build-b/target/wasm32v1-none/release/$c.wasm" | cut -d' ' -f1)
+            if [ "$ha" != "$hb" ]; then
+              echo "::error::$c.wasm is not reproducible"
+              echo "  build-a sha256: $ha"
+              echo "  build-b sha256: $hb"
+              fail=1
+            else
+              echo "$c.wasm reproducible: $ha"
+            fi
+          done
+          exit $fail

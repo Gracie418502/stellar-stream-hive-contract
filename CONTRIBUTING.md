@@ -131,6 +131,38 @@ rustup component add llvm-tools-preview
 cargo llvm-cov --workspace --summary-only
 ```
 
+## Reproducible WASM builds
+
+CI's `wasm-reproducible` job builds the three contracts twice, from
+`git archive HEAD`, in two different directories with separate target dirs.
+It compares the sha256 sums of the results and fails if they differ, printing
+both hashes. To run the same check locally:
+
+```bash
+for n in a b; do
+  d="$(mktemp -d)/build-$n"; mkdir -p "$d"
+  git archive HEAD | tar -x -C "$d"
+  (cd "$d" && cargo build --target wasm32v1-none --release --locked \
+    -p stellar-stream-hive-vault -p stellar-stream-hive-stream -p stellar-stream-hive-registry)
+  sha256sum "$d"/target/wasm32v1-none/release/*.wasm
+done
+```
+
+Two builds can differ for these reasons:
+
+- **Paths.** Absolute source paths can end up in the binary (for example in
+  panic or debug strings), so the same commit built in two directories can
+  hash differently. The CI job deliberately builds at two paths to catch this.
+- **Toolchain.** A different `rustc` or linker version changes the output.
+  `rust-toolchain.toml` pins the toolchain, and CI uses the same version.
+- **Dependencies.** Building without `--locked` can pull newer crate versions.
+  Always pass `--locked`.
+- **Build settings.** Environment variables such as `RUSTFLAGS` change the output.
+
+When a deployment has to match the repository, rebuild from a clean checkout
+with the pinned toolchain and `--locked`, then compare the hashes to the
+deployed artifact.
+
 ## Dependency audits
 
 `cargo audit` runs on every pull request and weekly on a schedule
