@@ -56,6 +56,19 @@ jobs:
           args: --offline --no-progress "*.md" "docs/*.md" ".github/**/*.md" "deployments/*.md"
           fail: true
 
+  markdown-lint:
+    name: Markdown (markdownlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lint Markdown
+        run: >
+          npx --yes markdownlint-cli2@0.24.2 "*.md" "docs/*.md"
+          ".github/**/*.md" "deployments/*.md"
+
   test:
     name: Test (native)
     runs-on: ubuntu-latest
