@@ -119,3 +119,27 @@ jobs:
               echo "| $f.wasm | $(stat -c%s "$WASM_DIR/$f.wasm") |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce WASM size budgets
+        # Budgets are per contract, in bytes: roughly 25% headroom over the
+        # sizes measured when they were set. Soroban's hard limit is 256 KiB.
+        # If a legitimate change exceeds a budget, raise it here in the same PR
+        # and explain the growth in the PR description.
+        run: |
+          WASM_DIR="target/wasm32v1-none/release"
+          fail=0
+          check() {
+            local name="$1" budget="$2"
+            local size
+            size=$(stat -c%s "$WASM_DIR/$name.wasm")
+            if [ "$size" -gt "$budget" ]; then
+              echo "::error::$name.wasm is $size bytes, over the budget of $budget bytes."
+              echo "To adjust, change the budget for $name in .github/workflows/ci.yml (wasm-build job)."
+              fail=1
+            else
+              echo "$name.wasm: $size / $budget bytes"
+            fi
+          }
+          check stellar_stream_hive_vault 24576
+          check stellar_stream_hive_stream 57344
+          check stellar_stream_hive_registry 32768
+          exit $fail
