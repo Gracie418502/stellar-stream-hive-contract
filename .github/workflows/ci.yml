@@ -45,6 +45,17 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps
 
+  markdown-links:
+    name: Markdown (relative links)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links offline
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress "*.md" "docs/*.md" ".github/**/*.md" "deployments/*.md"
+          fail: true
+
   test:
     name: Test (native)
     runs-on: ubuntu-latest
