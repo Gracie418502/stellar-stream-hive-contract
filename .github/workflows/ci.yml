@@ -29,6 +29,14 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Verify Cargo.lock is up to date
+        run: |
+          # --locked makes cargo refuse to rewrite Cargo.lock, so a Cargo.toml
+          # change without a matching lockfile update fails here.
+          if ! cargo metadata --locked --format-version 1 > /dev/null; then
+            echo "::error file=Cargo.lock::Cargo.lock is out of date with Cargo.toml. Run 'cargo update -w' (or 'cargo build') locally and commit the updated Cargo.lock."
+            exit 1
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       # too_many_arguments / needless_borrows_for_generic_args are inherent to
