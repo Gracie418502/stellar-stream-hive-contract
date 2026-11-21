@@ -165,3 +165,6 @@ stream type.
 
 <!-- handsoff-issue-201 -->
 - #201: Test: a cancelled stream still appears in the sender and recipient lists
+
+<!-- handsoff-issue-202 -->
+- #202: Test: `streamed_amount` and `withdrawable_amount` return `StreamNotFound` for unknown ids
