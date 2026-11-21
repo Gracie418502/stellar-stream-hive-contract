@@ -15,6 +15,10 @@ struct TestCtx {
     token: token::Client<'static>,
 }
 
+const INITIAL_MINT: i128 = 1_000;
+const DEPOSIT_AMOUNT: i128 = 400;
+const STREAM_ID_ONE: u64 = 1;
+
 fn setup() -> TestCtx {
     let env = Env::default();
     env.mock_all_auths();
@@ -63,14 +67,15 @@ fn test_initialize_twice_rejected() {
 fn test_deposit_transfers_tokens_into_vault() {
     let ctx = setup();
     let depositor = Address::generate(&ctx.env);
-    ctx.token_sac.mint(&depositor, &1_000);
+    ctx.token_sac.mint(&depositor, &INITIAL_MINT);
 
-    ctx.vault.deposit(&depositor, &ctx.token_address, &400, &1);
+    ctx.vault
+        .deposit(&depositor, &ctx.token_address, &DEPOSIT_AMOUNT, &STREAM_ID_ONE);
 
-    assert_eq!(ctx.token.balance(&depositor), 600);
-    assert_eq!(ctx.token.balance(&ctx.vault.address), 400);
-    assert_eq!(ctx.vault.balance_of_stream(&1), 400);
-    assert_eq!(ctx.vault.total_locked(&ctx.token_address), 400);
+    assert_eq!(ctx.token.balance(&depositor), INITIAL_MINT - DEPOSIT_AMOUNT);
+    assert_eq!(ctx.token.balance(&ctx.vault.address), DEPOSIT_AMOUNT);
+    assert_eq!(ctx.vault.balance_of_stream(&STREAM_ID_ONE), DEPOSIT_AMOUNT);
+    assert_eq!(ctx.vault.total_locked(&ctx.token_address), DEPOSIT_AMOUNT);
 }
 
 #[test]
