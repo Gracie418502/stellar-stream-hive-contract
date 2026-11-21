@@ -162,3 +162,6 @@ stream type.
 
 <!-- handsoff-issue-204 -->
 - #204: Test: vault `balance_of_stream` and `total_locked` for unknown inputs
+
+<!-- handsoff-issue-205 -->
+- #205: Test: `release` moves the tokens to the `to` address
