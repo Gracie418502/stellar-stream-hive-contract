@@ -47,6 +47,20 @@ jobs:
           -A clippy::too_many_arguments
           -A clippy::needless_borrows_for_generic_args
 
+  unused-deps:
+    name: Unused dependencies (cargo-machete)
+    runs-on: ubuntu-latest
+    # Informational for now: cargo-machete can report false positives (e.g.
+    # deps used only via macros). Drop continue-on-error once the output is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: Find unused dependencies
+        run: cargo machete --with-metadata
+
   docs:
     if: github.event_name != 'schedule'
     name: Docs (rustdoc, warnings as errors)
@@ -69,6 +83,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run workspace test suite
         run: cargo test --workspace --verbose
+
+  coverage:
+    name: Test coverage (cargo-llvm-cov, informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect coverage and write job summary
+        run: |
+          cargo llvm-cov --workspace --summary-only > coverage.txt 2>&1 || true
+          {
+            echo "### Test coverage (informational, no threshold)"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   wasm-build:
     if: github.event_name != 'schedule'
