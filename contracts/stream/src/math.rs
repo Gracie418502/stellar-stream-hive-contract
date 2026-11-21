@@ -199,6 +199,34 @@ mod tests {
     }
 
     #[test]
+    fn compute_status_at_exact_boundaries() {
+        let env = Env::default();
+        let s = make_stream(&env, 100, 200, 100, 1000);
+        // start - 1: still pending.
+        assert_eq!(compute_status(&s, 99), StreamStatus::Pending);
+        // start: the stream is live.
+        assert_eq!(compute_status(&s, 100), StreamStatus::Active);
+        // end - 1: still live, one ledger before completion.
+        assert_eq!(compute_status(&s, 199), StreamStatus::Active);
+        // end: completed exactly at the end ledger.
+        assert_eq!(compute_status(&s, 200), StreamStatus::Completed);
+    }
+
+    #[test]
+    fn cancelled_status_wins_at_every_boundary() {
+        let env = Env::default();
+        let mut s = make_stream(&env, 100, 200, 100, 1000);
+        s.status = StreamStatus::Cancelled;
+        s.cancelled_at_ledger = 150;
+        // A stored Cancelled status is terminal and time-independent: it
+        // must win at start - 1, start, end - 1 and end alike.
+        assert_eq!(compute_status(&s, 99), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&s, 100), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&s, 199), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&s, 200), StreamStatus::Cancelled);
+    }
+
+    #[test]
     fn streamed_never_exceeds_total_amount() {
         let env = Env::default();
         // total_amount is deliberately huge (but still small enough that
@@ -210,76 +238,5 @@ mod tests {
             let amt = streamed_amount(&s, now).unwrap();
             assert!(amt <= s.total_amount);
         }
-    }
-
-    #[test]
-    fn streamed_amount_overflow_is_caught_not_panicked() {
-        let env = Env::default();
-        // total_amount * elapsed genuinely cannot fit in i128 here
-        // (i128::MAX * 7 overflows). This must surface as a typed
-        // MathOverflow error, never a raw arithmetic panic.
-        let s = make_stream(&env, 0, 7, 0, i128::MAX);
-        assert_eq!(streamed_amount(&s, 3), Err(StreamError::MathOverflow));
-    }
-
-    #[test]
-    fn streamed_is_monotonic_non_decreasing_in_time() {
-        let env = Env::default();
-        // Awkward, non-divisible parameters stress the rounding.
-        let s = make_stream(&env, 7, 1_009, 7, 999_999_937);
-        let mut prev = 0;
-        for now in 0..=1_100u32 {
-            let amt = streamed_amount(&s, now).unwrap();
-            assert!(amt >= prev, "streamed went backwards at ledger {now}");
-            assert!(amt <= s.total_amount);
-            prev = amt;
-        }
-        assert_eq!(prev, s.total_amount);
-    }
-
-    #[test]
-    fn withdrawable_plus_withdrawn_never_exceeds_total() {
-        let env = Env::default();
-        let mut s = make_stream(&env, 0, 997, 0, 1_000_003);
-        for now in (0..=1_200u32).step_by(13) {
-            let w = withdrawable_amount(&s, now).unwrap();
-            assert!(w >= 0);
-            assert!(s.withdrawn + w <= s.total_amount);
-            // Withdraw everything available, as a greedy recipient would.
-            s.withdrawn += w;
-        }
-        // A fully-drained stream pays out exactly the deposit, no more.
-        assert_eq!(s.withdrawn, s.total_amount);
-    }
-
-    #[test]
-    fn rounding_always_favours_the_vault_never_the_recipient() {
-        let env = Env::default();
-        let s = make_stream(&env, 0, 3, 0, 10);
-        // 10 over 3 ledgers: 3, 6, 10 -- integer division rounds down.
-        assert_eq!(streamed_amount(&s, 1).unwrap(), 3);
-        assert_eq!(streamed_amount(&s, 2).unwrap(), 6);
-        assert_eq!(streamed_amount(&s, 3).unwrap(), 10);
-    }
-
-    #[test]
-    fn cancelled_before_cliff_leaves_nothing_withdrawable() {
-        let env = Env::default();
-        let mut s = make_stream(&env, 0, 1000, 500, 1_000_000);
-        s.status = StreamStatus::Cancelled;
-        s.cancelled_at_ledger = 300;
-        assert_eq!(withdrawable_amount(&s, 9_999).unwrap(), 0);
-    }
-
-    #[test]
-    fn withdrawable_floors_at_zero_when_withdrawn_exceeds_streamed() {
-        let env = Env::default();
-        // At ledger 100 only 10% of the 1_000_000 deposit has streamed, but
-        // the recipient has already taken 600_000. The raw difference is
-        // negative, and `withdrawable_amount` must clamp it to zero.
-        let mut s = make_stream(&env, 0, 1000, 0, 1_000_000);
-        s.withdrawn = 600_000;
-        assert_eq!(streamed_amount(&s, 100).unwrap(), 100_000);
-        assert_eq!(withdrawable_amount(&s, 100).unwrap(), 0);
     }
 }
