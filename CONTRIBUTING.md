@@ -7,6 +7,14 @@ real-time payment streaming. Sister repos:
 - API/indexer: https://github.com/Stellar-Hive/stellar-stream-hive-api
 - Frontend: https://github.com/Stellar-Hive/stellar-stream-hive-frontend
 
+## Dev container (optional)
+
+`.devcontainer/devcontainer.json` gives a ready-to-code environment in
+VS Code, GitHub Codespaces, or any Dev Containers client. It installs
+`just` and the Stellar CLI and adds the `wasm32v1-none` target. The Rust
+version comes from `rust-toolchain.toml`, which rustup applies on first use.
+The steps below do the same setup by hand.
+
 ## Local dev setup
 
 1. **Install Rust via rustup**: https://rustup.rs
@@ -48,6 +56,18 @@ builds and passes CI locally (`cargo test --workspace`, `cargo fmt --all --
 
 The `justfile` wraps the commands below: `just test`, `just fmt`, `just lint`, `just wasm`, and
 `just check` to run everything CI runs. Install [just](https://just.systems) to use it.
+
+| Recipe | What it runs |
+|---|---|
+| `just test` | `cargo test --workspace` |
+| `just test-one NAME` | Runs only tests whose name contains `NAME` |
+| `just fmt` | `cargo fmt --all` |
+| `just lint` | `cargo fmt --check` and clippy with CI's flags |
+| `just doc` | rustdoc for the workspace, with warnings as errors (matches CI's docs job) |
+| `just audit` | `cargo audit` (install with `cargo install cargo-audit --locked`) |
+| `just wasm` | Release build for the `wasm32v1-none` deployment target |
+| `just wasm-size` | Builds the contracts and prints each WASM artifact's size in bytes |
+| `just check` | `lint`, `test` and `wasm`, the same gates CI runs |
 
 ```bash
 # Run every test in the workspace (vault, stream, registry)
@@ -158,6 +178,29 @@ rather than letting the job stay red: add the advisory id (e.g.
 comment explaining why it doesn't apply and, if there is one, a link to an
 upstream issue tracking a real fix. Never disable or remove the audit job to
 make a failure go away.
+
+## Optional: pre-commit hooks
+
+`.pre-commit-config.yaml` runs the same `cargo fmt --check` and clippy
+commands as CI before each commit. It is opt-in and nothing enforces it:
+
+```bash
+pip install pre-commit      # or: pipx install pre-commit
+pre-commit install          # adds the git hook to this clone
+pre-commit run --all-files  # optional: run every hook once now
+```
+
+CI remains the source of truth. Skip the hook for a single commit with
+`git commit --no-verify` if you need to.
+
+`cargo deny` runs on every pull request in the same workflow
+(`.github/workflows/audit.yml`). It checks the dependency licenses, banned
+crates, and crate sources against `deny.toml`. Duplicate crate versions are
+reported as warnings and do not fail the job. To check locally, install
+`cargo-deny` and run `cargo deny check licenses bans sources`. If a new
+dependency brings in a license that is not in the `allow` list, either
+choose a different dependency or add the SPDX id to `deny.toml` with a
+comment explaining why.
 
 ## The streaming math, explained
 
