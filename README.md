@@ -162,3 +162,6 @@ stream type.
 
 <!-- handsoff-issue-184 -->
 - #184: Test: `cancel_stream` without the sender's authorization fails
+
+<!-- handsoff-issue-185 -->
+- #185: Test: `initialize` requires the admin's authorization
