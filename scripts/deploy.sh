@@ -10,7 +10,7 @@
 #     (e.g. `stellar keys generate deployer --network testnet --fund`)
 #
 # Usage:
-#   scripts/deploy.sh [network] [source-identity]
+#   scripts/deploy.sh [--dry-run] [network] [source-identity]
 #
 #   scripts/deploy.sh testnet deployer
 #   CONFIRM_MAINNET=yes scripts/deploy.sh mainnet deployer
@@ -160,6 +160,12 @@ invoke "$STREAM_ID" initialize --admin "$ADMIN_ADDRESS" --vault "$VAULT_ID"
 echo
 echo "-- Initializing registry contract (admin=$ADMIN_ADDRESS) --"
 invoke "$REGISTRY_ID" initialize --admin "$ADMIN_ADDRESS"
+
+if [ "" = "true" ]; then
+  echo
+  echo "== Dry run complete: deployment sequence planned successfully =="
+  exit 0
+fi
 
 echo
 echo "-- Verifying the deployment --"
