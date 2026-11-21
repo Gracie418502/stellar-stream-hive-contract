@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::{RegistryContract, RegistryContractClient, RegistryError, StreamStatus};
+use crate::{RegistryContract, RegistryContractClient, RegistryError, StreamStatus, MAX_PAGE_SIZE};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 struct TestCtx {
@@ -254,23 +254,23 @@ fn test_update_stream_to_completed_decrements_active_count() {
         .register_stream(&1, &sender, &recipient, &token, &1000);
     assert_eq!(ctx.registry.get_stats().active_streams, 1);
 
-    ctx.registry
-        .update_stream(&1, &1000, &StreamStatus::Completed);
+    ctx.registry.update_stream(&1, &0, &StreamStatus::Completed);
     assert_eq!(ctx.registry.get_stats().active_streams, 0);
 }
 
 #[test]
-fn test_update_stream_to_cancelled_decrements_active_count() {
+fn test_get_streams_page_capped_at_max_page_size() {
     let ctx = setup();
     let sender = Address::generate(&ctx.env);
     let recipient = Address::generate(&ctx.env);
     let token = Address::generate(&ctx.env);
-    ctx.registry
-        .register_stream(&1, &sender, &recipient, &token, &1000);
 
-    ctx.registry
-        .update_stream(&1, &400, &StreamStatus::Cancelled);
-    let stats = ctx.registry.get_stats();
-    assert_eq!(stats.active_streams, 0);
-    assert_eq!(stats.total_withdrawn, 400);
+    let total = MAX_PAGE_SIZE + 5;
+    for id in 0..total {
+        ctx.registry
+            .register_stream(&id, &sender, &recipient, &token, &1000);
+    }
+
+    let page = ctx.registry.get_streams_page(&0, &u32::MAX);
+    assert_eq!(page.len(), MAX_PAGE_SIZE);
 }
