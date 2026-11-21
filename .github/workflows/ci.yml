@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly full test run to catch drift from yanked or changed dependencies.
+  # Only the test job runs on this trigger (see the `if:` guards below).
+  # 03:17 UTC keeps clear of the audit workflow's Monday 06:00 run.
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -15,14 +20,23 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name != 'schedule'
     name: Lint (fmt, clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Verify Cargo.lock is up to date
+        run: |
+          # --locked makes cargo refuse to rewrite Cargo.lock, so a Cargo.toml
+          # change without a matching lockfile update fails here.
+          if ! cargo metadata --locked --format-version 1 > /dev/null; then
+            echo "::error file=Cargo.lock::Cargo.lock is out of date with Cargo.toml. Run 'cargo update -w' (or 'cargo build') locally and commit the updated Cargo.lock."
+            exit 1
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       # too_many_arguments / needless_borrows_for_generic_args are inherent to
@@ -33,12 +47,27 @@ jobs:
           -A clippy::too_many_arguments
           -A clippy::needless_borrows_for_generic_args
 
+  unused-deps:
+    name: Unused dependencies (cargo-machete)
+    runs-on: ubuntu-latest
+    # Informational for now: cargo-machete can report false positives (e.g.
+    # deps used only via macros). Drop continue-on-error once the output is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: Find unused dependencies
+        run: cargo machete --with-metadata
+
   docs:
+    if: github.event_name != 'schedule'
     name: Docs (rustdoc, warnings as errors)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
       - name: Build rustdoc with warnings as errors
         env:
@@ -50,17 +79,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
       - name: Run workspace test suite
         run: cargo test --workspace --verbose
 
-  wasm-build:
-    name: Build (wasm32v1-none)
+  coverage:
+    name: Test coverage (cargo-llvm-cov, informational)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Collect coverage and write job summary
+        run: |
+          cargo llvm-cov --workspace --summary-only > coverage.txt 2>&1 || true
+          {
+            echo "### Test coverage (informational, no threshold)"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  wasm-build:
+    if: github.event_name != 'schedule'
+    name: Build (wasm32v1-none)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
@@ -82,3 +135,24 @@ jobs:
               echo "| $f.wasm | $(stat -c%s "$WASM_DIR/$f.wasm") |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Checksum WASM artifacts
+        run: |
+          WASM_DIR="target/wasm32v1-none/release"
+          mkdir -p wasm-dist
+          cp "$WASM_DIR"/stellar_stream_hive_vault.wasm \
+             "$WASM_DIR"/stellar_stream_hive_stream.wasm \
+             "$WASM_DIR"/stellar_stream_hive_registry.wasm \
+             wasm-dist/
+          (cd wasm-dist && sha256sum *.wasm > SHA256SUMS)
+          cat wasm-dist/SHA256SUMS
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-artifacts
+          path: |
+            wasm-dist/stellar_stream_hive_vault.wasm
+            wasm-dist/stellar_stream_hive_stream.wasm
+            wasm-dist/stellar_stream_hive_registry.wasm
+            wasm-dist/SHA256SUMS
+          retention-days: 7
+          if-no-files-found: error

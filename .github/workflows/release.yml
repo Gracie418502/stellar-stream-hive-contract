@@ -1,0 +1,100 @@
+name: Release
+
+# Runs when a version tag such as v1.2.3 is pushed. Builds the optimized WASM
+# contracts, then publishes a GitHub release with SHA256SUMS and the matching
+# CHANGELOG.md section as the release notes.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Read-only by default. Only the publish job below asks for write access.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build WASM (wasm32v1-none)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      - name: Build every contract to the deployment artifact
+        run: |
+          cargo build --locked --target wasm32v1-none --release \
+            -p stellar-stream-hive-vault \
+            -p stellar-stream-hive-stream \
+            -p stellar-stream-hive-registry
+      - name: Collect WASM files and checksums
+        run: |
+          WASM_DIR="target/wasm32v1-none/release"
+          mkdir -p wasm-dist
+          cp "$WASM_DIR"/stellar_stream_hive_vault.wasm \
+             "$WASM_DIR"/stellar_stream_hive_stream.wasm \
+             "$WASM_DIR"/stellar_stream_hive_registry.wasm \
+             wasm-dist/
+          (cd wasm-dist && sha256sum *.wasm > SHA256SUMS)
+          cat wasm-dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-wasm
+          path: wasm-dist/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    # Only this job may write to the repository.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-wasm
+          path: wasm-dist
+      - name: Extract changelog notes for this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          # Print the body of the "## [VERSION]" section, up to the next "## " heading.
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (inside) exit; if (index($0, "[" ver "]")) inside = 1; next }
+            inside { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG.md section for $VERSION; release will use generated notes."
+            rm -f release-notes.md
+          fi
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ASSETS=(
+            wasm-dist/stellar_stream_hive_vault.wasm
+            wasm-dist/stellar_stream_hive_stream.wasm
+            wasm-dist/stellar_stream_hive_registry.wasm
+            wasm-dist/SHA256SUMS
+          )
+          if [ -f release-notes.md ]; then
+            NOTES_ARGS=(--notes-file release-notes.md)
+          else
+            NOTES_ARGS=(--generate-notes)
+          fi
+          case "$TAG" in
+            *-*) PRERELEASE=(--prerelease) ;;
+            *)   PRERELEASE=() ;;
+          esac
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --title "$TAG" \
+            --verify-tag \
+            "${NOTES_ARGS[@]}" \
+            "${PRERELEASE[@]}"

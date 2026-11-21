@@ -1,4 +1,4 @@
-﻿#![cfg(test)]
+#![cfg(test)]
 
 use crate::types::StreamStatus;
 use crate::{StreamContract, StreamContractClient};
@@ -19,11 +19,22 @@ use soroban_sdk::{
 /// realistically enough for the stream contract's own math and control
 /// flow to be tested end-to-end.
 mod mock_vault {
-    use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+    use soroban_sdk::{contract, contractevent, contractimpl, contracttype, token, Address, Env};
 
     #[contracttype]
     enum Key {
         Balance(u64),
+    }
+
+    /// Mirrors the real vault's `Refund` event (same topics and data layout)
+    /// so tests can assert the order of events emitted during `cancel_stream`.
+    #[contractevent(data_format = "vec")]
+    pub struct Refund {
+        #[topic]
+        pub stream_id: u64,
+        pub to: Address,
+        pub token: Address,
+        pub amount: i128,
     }
 
     #[contract]
@@ -70,7 +81,23 @@ mod mock_vault {
             amount: i128,
             stream_id: u64,
         ) {
-            Self::release(env, caller, to, token, amount, stream_id);
+            // Same order as the real vault: token transfer first, then the
+            // vault's own `Refund` event.
+            Self::release(
+                env.clone(),
+                caller,
+                to.clone(),
+                token.clone(),
+                amount,
+                stream_id,
+            );
+            Refund {
+                stream_id,
+                to,
+                token,
+                amount,
+            }
+            .publish(&env);
         }
 
         pub fn balance_of_stream(env: Env, stream_id: u64) -> i128 {
@@ -777,13 +804,79 @@ fn test_page_size_is_capped() {
     assert_eq!(page.len(), crate::MAX_PAGE_SIZE);
 }
 
+#[test]
+fn test_recipient_pagination_edge_cases() {
+    let ctx = setup();
+    create_default_stream(&ctx, true);
+    create_default_stream(&ctx, true);
+
+    // offset exactly at the end (2 streams, offset 2) -> empty, not an error
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &2, &10)
+            .len(),
+        0
+    );
+    // offset one before the end -> just the last stream
+    let page = ctx
+        .stream
+        .get_streams_by_recipient_page(&ctx.recipient, &1, &10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().id, 2);
+
+    // offset beyond the end -> empty
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &5, &10)
+            .len(),
+        0
+    );
+    // zero limit -> empty
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &0, &0)
+            .len(),
+        0
+    );
+    // offset + limit overflow must saturate, not panic
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &u32::MAX, &u32::MAX)
+            .len(),
+        0
+    );
+    // unknown address -> empty
+    let stranger = Address::generate(&ctx.env);
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&stranger, &0, &10)
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn test_recipient_page_size_is_capped() {
+    let ctx = setup();
+    let n = crate::MAX_PAGE_SIZE + 3;
+    token::StellarAssetClient::new(&ctx.env, &ctx.token_address)
+        .mint(&ctx.sender, &(AMOUNT * n as i128));
+    for _ in 0..n {
+        create_default_stream(&ctx, true);
+    }
+    let page = ctx
+        .stream
+        .get_streams_by_recipient_page(&ctx.recipient, &0, &u32::MAX);
+    assert_eq!(page.len(), crate::MAX_PAGE_SIZE);
+}
+
 // ---------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------
 
 #[test]
 fn test_create_event_carries_cliff_and_cancellable() {
-    use soroban_sdk::{symbol_short, testutils::Events as _, vec};
+    use soroban_sdk::{symbol_short, testutils::Events as _, vec, IntoVal as _};
     let ctx = setup();
 
     // A cliff distinct from both START and END, and cancellable = false, so a
@@ -821,8 +914,8 @@ fn test_create_event_carries_cliff_and_cancellable() {
             .into_val(&ctx.env),
     );
 
-    // Only the stream contract's events are compared: the deposit also emits
-    // a token `transfer` event, which is not part of the create payload.
+    // Filter to the stream contract: the deposit also emits the token's
+    // `transfer` event, which is not part of this contract's create payload.
     assert_eq!(
         ctx.env
             .events()
@@ -1380,4 +1473,111 @@ fn test_create_stream_rejects_negative_amount() {
 
     // No tokens must have moved.
     assert_eq!(ctx.token.balance(&ctx.sender), balance_before);
+}
+
+// ---------------------------------------------------------------------
+// Failed token transfers and event ordering
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_create_stream_with_non_token_address_leaves_no_state() {
+    use soroban_sdk::testutils::Events as _;
+    let ctx = setup();
+    // A plain account address: it is not a contract, so the vault's
+    // `transfer` call cannot succeed.
+    let not_a_token = Address::generate(&ctx.env);
+    let sender_balance_before = ctx.token.balance(&ctx.sender);
+
+    let result = ctx.stream.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &not_a_token,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    assert!(
+        result.is_err(),
+        "create_stream must fail for a non-token address"
+    );
+
+    // No stream record, no sender/recipient index entries.
+    assert_eq!(
+        ctx.stream.try_get_stream(&1),
+        Err(Ok(crate::error::StreamError::StreamNotFound))
+    );
+    assert_eq!(ctx.stream.count_streams_by_sender(&ctx.sender), 0);
+    assert_eq!(ctx.stream.count_streams_by_recipient(&ctx.recipient), 0);
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_sender_page(&ctx.sender, &0, &10)
+            .len(),
+        0
+    );
+
+    // No create event from the stream contract survived the failed call.
+    assert!(ctx
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&ctx.stream.address)
+        .events()
+        .is_empty());
+
+    // No tokens moved.
+    assert_eq!(ctx.token.balance(&ctx.sender), sender_balance_before);
+
+    // The failed attempt did not consume an id: the next valid stream is 1.
+    assert_eq!(create_default_stream(&ctx, true), 1);
+}
+
+#[test]
+fn test_cancel_event_order_is_transfer_then_vault_refund_then_cancel() {
+    use crate::events;
+    use soroban_sdk::{testutils::Events as _, Event as _};
+
+    let ctx = setup();
+    let id = create_default_stream(&ctx, true);
+    let midpoint = START + (END - START) / 2;
+    set_ledger(&ctx, midpoint);
+
+    ctx.stream.cancel_stream(&ctx.sender, &id);
+
+    let streamed_now = AMOUNT / 2;
+    let remainder = AMOUNT - streamed_now;
+
+    // Emission order during `cancel_stream`:
+    //   1. the token contract's `transfer` event (vault -> sender refund),
+    //   2. the vault's `Refund` event,
+    //   3. the stream contract's `Cancel` event, published last, exactly once.
+    let emitted = ctx.env.events().all();
+    let events = emitted.events();
+    assert_eq!(events.len(), 3, "unexpected events: {events:?}");
+
+    assert_eq!(
+        emitted.filter_by_contract(&ctx.token_address).events(),
+        &events[..1]
+    );
+    assert_eq!(
+        events[1],
+        mock_vault::Refund {
+            stream_id: id,
+            to: ctx.sender.clone(),
+            token: ctx.token_address.clone(),
+            amount: remainder,
+        }
+        .to_xdr(&ctx.env, &ctx.vault.address)
+    );
+    assert_eq!(
+        events[2],
+        events::Cancel {
+            stream_id: id,
+            sender: ctx.sender.clone(),
+            streamed_now,
+            remainder,
+        }
+        .to_xdr(&ctx.env, &ctx.stream.address)
+    );
 }

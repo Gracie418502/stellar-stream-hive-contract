@@ -1,0 +1,19 @@
+# Path rules for .github/workflows/labeler.yml (actions/labeler v5).
+# Every label here must already exist in the repository.
+
+rust:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'contracts/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**/*.md'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'scripts/**'
+          - '.github/**'

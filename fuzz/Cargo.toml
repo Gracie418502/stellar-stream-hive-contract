@@ -1,0 +1,25 @@
+[package]
+name = "stellar-stream-hive-stream-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "cargo-fuzz targets for the Stream contract's streaming math. Not part of the workspace or CI."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+soroban-sdk = { version = "=27.0.6", features = ["testutils"] }
+
+[[bin]]
+name = "streamed_math"
+path = "fuzz_targets/streamed_math.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone package: keep it out of the root workspace so `cargo test
+# --workspace` and the required CI jobs never build it.
+[workspace]

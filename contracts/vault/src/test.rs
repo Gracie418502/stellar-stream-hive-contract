@@ -718,3 +718,60 @@ fn test_releasing_full_balance_leaves_zero_locked() {
     assert_eq!(ctx.token.balance(&ctx.vault.address), 0);
     assert_eq!(ctx.token.balance(&recipient), 500);
 }
+
+#[test]
+fn test_release_for_unfunded_stream_returns_insufficient_balance() {
+    // Documents CURRENT behaviour. A stream id that was never funded has no
+    // pinned token and a zero balance. `authorize_and_pay` checks the token
+    // only when one is pinned, so the call passes the caller check and fails
+    // at the balance check with `InsufficientBalance`. Nothing moves and no
+    // event is emitted.
+    use soroban_sdk::testutils::Events as _;
+
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+    let unknown_stream_id = 999;
+
+    let result = ctx.vault.try_release(
+        &ctx.stream_contract,
+        &recipient,
+        &ctx.token_address,
+        &100,
+        &unknown_stream_id,
+    );
+    assert_eq!(result, Err(Ok(VaultError::InsufficientBalance)));
+    assert!(ctx.env.events().all().events().is_empty());
+
+    assert_eq!(ctx.vault.balance_of_stream(&unknown_stream_id), 0);
+    assert_eq!(ctx.vault.total_locked(&ctx.token_address), 0);
+    assert_eq!(ctx.token.balance(&recipient), 0);
+    assert_eq!(ctx.token.balance(&ctx.vault.address), 0);
+}
+
+#[test]
+fn test_set_stream_contract_to_current_address_is_accepted_and_emits_event() {
+    // Documents CURRENT behaviour. `set_stream_contract` does not compare the
+    // new address with the stored one. Re-pointing to the address that is
+    // already configured succeeds, leaves the stored address unchanged, and
+    // still publishes `SetStreamContract` with that same address.
+    use crate::events;
+    use soroban_sdk::{testutils::Events as _, Event as _};
+
+    let ctx = setup();
+    assert_eq!(ctx.vault.get_stream_contract(), ctx.stream_contract);
+
+    let result = ctx
+        .vault
+        .try_set_stream_contract(&ctx.admin, &ctx.stream_contract);
+    assert_eq!(result, Ok(Ok(())));
+
+    let emitted = ctx.env.events().all();
+    assert_eq!(
+        emitted.filter_by_contract(&ctx.vault.address),
+        [events::SetStreamContract {
+            new_contract: ctx.stream_contract.clone(),
+        }
+        .to_xdr(&ctx.env, &ctx.vault.address)],
+    );
+    assert_eq!(ctx.vault.get_stream_contract(), ctx.stream_contract);
+}
