@@ -51,6 +51,22 @@ Three contracts, each a workspace member under `contracts/`:
   block explorers. It never custodies funds and isn't in the trust path
   for any transfer.
 
+## Contracts at a glance
+
+Public functions of each contract, grouped as write, read and admin.
+Generated from `contracts/*/src/lib.rs` by
+[`scripts/contract-functions.sh`](scripts/contract-functions.sh). Write
+functions change state, read functions only query it, and admin functions
+are gated by the stored admin or are the one-time `initialize`. The registry's
+write functions carry no caller check by design; see
+[docs/registry.md](docs/registry.md#security-notes-why-write-access-here-is-intentionally-open).
+
+| Contract | Write | Read | Admin |
+|---|---|---|---|
+| `vault` | `deposit`, `release`, `refund` | `balance_of_stream`, `total_locked`, `get_stream_contract`, `get_admin` | `initialize`, `set_stream_contract` |
+| `stream` | `create_stream`, `withdraw`, `withdraw_max`, `cancel_stream` | `streamed_amount`, `withdrawable_amount`, `get_stream`, `get_streams_by_sender`, `get_streams_by_recipient`, `get_status`, `count_streams_by_sender`, `count_streams_by_recipient`, `get_streams_by_sender_page`, `get_streams_by_recipient_page`, `is_paused`, `get_admin`, `get_vault` | `initialize`, `pause`, `unpause`, `transfer_admin` |
+| `registry` | `register_stream`, `update_stream` | `get_all_streams`, `stream_count`, `get_streams_page`, `get_stats`, `get_active_streams`, `get_stream_record`, `get_admin` | `initialize` |
+
 ## Quickstart
 
 Requires Rust (via [rustup](https://rustup.rs)), the
