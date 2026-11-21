@@ -208,6 +208,12 @@ echo
 echo "-- Initializing registry contract (admin=$ADMIN_ADDRESS) --"
 invoke "$REGISTRY_ID" initialize --admin "$ADMIN_ADDRESS"
 
+if [ "" = "true" ]; then
+  echo
+  echo "== Dry run complete: deployment sequence planned successfully =="
+  exit 0
+fi
+
 echo
 echo "-- Verifying the deployment --"
 expect_eq "vault admin" "$(invoke "$VAULT_ID" get_admin | unquote)" "$ADMIN_ADDRESS"
