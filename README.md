@@ -168,3 +168,6 @@ stream type.
 
 <!-- handsoff-issue-182 -->
 - #182: Test: `create_stream` without the sender's authorization fails
+
+<!-- handsoff-issue-183 -->
+- #183: Test: `withdraw` without the recipient's authorization fails
