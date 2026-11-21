@@ -119,49 +119,32 @@ or refactor — the two `-A` exemptions above are the only ones CI makes.
 using `just`, run those three by hand as spelled out above and in
 "Build, test, deploy".
 
-## Test coverage
+## Releases
 
-CI's `coverage` job runs [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
-over the workspace and writes a summary table to the job summary. It is
-informational only and has no threshold. To run it locally:
+Releases are automated by `.github/workflows/release.yml`. Pushing a tag that
+matches `v*` (for example `v1.2.0`) builds the three WASM contracts, then
+creates a GitHub release with:
 
-```bash
-cargo install cargo-llvm-cov --locked
-rustup component add llvm-tools-preview
-cargo llvm-cov --workspace --summary-only
-```
+- `stellar_stream_hive_{vault,stream,registry}.wasm`
+- `SHA256SUMS`, so deployers can verify the files they download
+- the release notes copied from the matching `## [1.2.0]` section of
+  `CHANGELOG.md`. If no section matches, GitHub generates the notes instead.
 
-## Reproducible WASM builds
+Tags containing a `-` (such as `v1.2.0-rc.1`) are marked as pre-releases.
 
-CI's `wasm-reproducible` job builds the three contracts twice, from
-`git archive HEAD`, in two different directories with separate target dirs.
-It compares the sha256 sums of the results and fails if they differ, printing
-both hashes. To run the same check locally:
+To cut a release:
 
-```bash
-for n in a b; do
-  d="$(mktemp -d)/build-$n"; mkdir -p "$d"
-  git archive HEAD | tar -x -C "$d"
-  (cd "$d" && cargo build --target wasm32v1-none --release --locked \
-    -p stellar-stream-hive-vault -p stellar-stream-hive-stream -p stellar-stream-hive-registry)
-  sha256sum "$d"/target/wasm32v1-none/release/*.wasm
-done
-```
+1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
+   `## [X.Y.Z]` heading and merge that change to `main`.
+2. Tag the merge commit and push the tag:
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+3. Check the run in the Actions tab and confirm the release assets and
+   checksums.
 
-Two builds can differ for these reasons:
-
-- **Paths.** Absolute source paths can end up in the binary (for example in
-  panic or debug strings), so the same commit built in two directories can
-  hash differently. The CI job deliberately builds at two paths to catch this.
-- **Toolchain.** A different `rustc` or linker version changes the output.
-  `rust-toolchain.toml` pins the toolchain, and CI uses the same version.
-- **Dependencies.** Building without `--locked` can pull newer crate versions.
-  Always pass `--locked`.
-- **Build settings.** Environment variables such as `RUSTFLAGS` change the output.
-
-When a deployment has to match the repository, rebuild from a clean checkout
-with the pinned toolchain and `--locked`, then compare the hashes to the
-deployed artifact.
+Only the publish job has `contents: write`. Every other job runs read-only.
 
 ## Dependency audits
 

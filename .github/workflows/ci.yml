@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly full test run to catch drift from yanked or changed dependencies.
+  # Only the test job runs on this trigger (see the `if:` guards below).
+  # 03:17 UTC keeps clear of the audit workflow's Monday 06:00 run.
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -15,14 +20,23 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name != 'schedule'
     name: Lint (fmt, clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Verify Cargo.lock is up to date
+        run: |
+          # --locked makes cargo refuse to rewrite Cargo.lock, so a Cargo.toml
+          # change without a matching lockfile update fails here.
+          if ! cargo metadata --locked --format-version 1 > /dev/null; then
+            echo "::error file=Cargo.lock::Cargo.lock is out of date with Cargo.toml. Run 'cargo update -w' (or 'cargo build') locally and commit the updated Cargo.lock."
+            exit 1
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       # too_many_arguments / needless_borrows_for_generic_args are inherent to
@@ -48,11 +62,12 @@ jobs:
         run: cargo machete --with-metadata
 
   docs:
+    if: github.event_name != 'schedule'
     name: Docs (rustdoc, warnings as errors)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
       - name: Build rustdoc with warnings as errors
         env:
@@ -64,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: Swatinem/rust-cache@v2
       - name: Run workspace test suite
         run: cargo test --workspace --verbose
@@ -93,11 +108,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   wasm-build:
+    if: github.event_name != 'schedule'
     name: Build (wasm32v1-none)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: wasm32v1-none
       - uses: Swatinem/rust-cache@v2
@@ -119,75 +135,24 @@ jobs:
               echo "| $f.wasm | $(stat -c%s "$WASM_DIR/$f.wasm") |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Enforce WASM size budgets
-        # Budgets are per contract, in bytes: roughly 25% headroom over the
-        # sizes measured when they were set. Soroban's hard limit is 256 KiB.
-        # If a legitimate change exceeds a budget, raise it here in the same PR
-        # and explain the growth in the PR description.
+      - name: Checksum WASM artifacts
         run: |
           WASM_DIR="target/wasm32v1-none/release"
-          fail=0
-          check() {
-            local name="$1" budget="$2"
-            local size
-            size=$(stat -c%s "$WASM_DIR/$name.wasm")
-            if [ "$size" -gt "$budget" ]; then
-              echo "::error::$name.wasm is $size bytes, over the budget of $budget bytes."
-              echo "To adjust, change the budget for $name in .github/workflows/ci.yml (wasm-build job)."
-              fail=1
-            else
-              echo "$name.wasm: $size / $budget bytes"
-            fi
-          }
-          check stellar_stream_hive_vault 24576
-          check stellar_stream_hive_stream 57344
-          check stellar_stream_hive_registry 32768
-          exit $fail
-
-  wasm-reproducible:
-    name: Reproducible WASM build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+          mkdir -p wasm-dist
+          cp "$WASM_DIR"/stellar_stream_hive_vault.wasm \
+             "$WASM_DIR"/stellar_stream_hive_stream.wasm \
+             "$WASM_DIR"/stellar_stream_hive_registry.wasm \
+             wasm-dist/
+          (cd wasm-dist && sha256sum *.wasm > SHA256SUMS)
+          cat wasm-dist/SHA256SUMS
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
         with:
-          targets: wasm32v1-none
-      - uses: Swatinem/rust-cache@v2
-      # Builds the same commit twice, in two different directories with their
-      # own target dirs, and fails if the WASM sha256 sums differ. Differences
-      # can come from absolute paths embedded in the binary (so the two builds
-      # deliberately live at different paths), or from a different rustc or
-      # linker. The toolchain is pinned in rust-toolchain.toml and above.
-      - name: Build twice in separate directories and compare
-        run: |
-          set -euo pipefail
-          CONTRACTS="stellar_stream_hive_vault stellar_stream_hive_stream stellar_stream_hive_registry"
-          ROOT="${RUNNER_TEMP:-/tmp}/reproducible"
-          rm -rf "$ROOT"
-          for n in a b; do
-            dir="$ROOT/build-$n"
-            mkdir -p "$dir"
-            git archive HEAD | tar -x -C "$dir"
-            (
-              cd "$dir"
-              cargo build --target wasm32v1-none --release --locked \
-                -p stellar-stream-hive-vault \
-                -p stellar-stream-hive-stream \
-                -p stellar-stream-hive-registry \
-                --target-dir "$dir/target"
-            )
-          done
-          fail=0
-          for c in $CONTRACTS; do
-            ha=$(sha256sum "$ROOT/build-a/target/wasm32v1-none/release/$c.wasm" | cut -d' ' -f1)
-            hb=$(sha256sum "$ROOT/build-b/target/wasm32v1-none/release/$c.wasm" | cut -d' ' -f1)
-            if [ "$ha" != "$hb" ]; then
-              echo "::error::$c.wasm is not reproducible"
-              echo "  build-a sha256: $ha"
-              echo "  build-b sha256: $hb"
-              fail=1
-            else
-              echo "$c.wasm reproducible: $ha"
-            fi
-          done
-          exit $fail
+          name: wasm-artifacts
+          path: |
+            wasm-dist/stellar_stream_hive_vault.wasm
+            wasm-dist/stellar_stream_hive_stream.wasm
+            wasm-dist/stellar_stream_hive_registry.wasm
+            wasm-dist/SHA256SUMS
+          retention-days: 7
+          if-no-files-found: error

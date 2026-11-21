@@ -1,4 +1,7 @@
 contact_links:
+  - name: Questions and getting help
+    url: https://github.com/Stellar-Hive/stellar-stream-hive-contract/blob/main/SUPPORT.md
+    about: Where to ask questions, what belongs in an issue and where security reports go.
   - name: Report a security vulnerability
     url: https://github.com/Stellar-Hive/stellar-stream-hive-contract/security/advisories/new
     about: Private reporting for anything that could put funds at risk. See SECURITY.md.
