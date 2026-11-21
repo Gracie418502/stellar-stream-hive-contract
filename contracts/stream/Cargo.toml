@@ -15,6 +15,9 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+# Real vault, used only by tests/vault_integration.rs so the Stream -> Vault
+# call chain is exercised without a mock.
+stellar-stream-hive-vault = { path = "../vault" }
 
 [features]
 testutils = ["soroban-sdk/testutils"]

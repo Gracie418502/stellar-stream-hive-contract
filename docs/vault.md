@@ -94,40 +94,56 @@ vault.
 
 ## Function reference
 
+<a id="initialize"></a>
+
 ### `initialize(env, admin: Address, stream_contract: Address)`
+
 One-time setup. Requires `admin.require_auth()`. Fails with
 `AlreadyInitialized` if called twice.
 
 ### `deposit(env, from: Address, token: Address, amount: i128, stream_id: u64)`
+
 Pulls `amount` of `token` from `from` into the vault via the token's SEP-41
 `transfer`, and credits `stream_id`'s locked balance. Requires
 `from.require_auth()`. The first deposit for a `stream_id` fixes the token
 it is denominated in; subsequent deposits with a different token are
 rejected with `TokenMismatch`.
 
+<a id="release"></a>
+
 ### `release(env, caller: Address, to: Address, token: Address, amount: i128, stream_id: u64)`
+
 Moves `amount` of `token` out of `stream_id`'s locked balance to `to`. See
 [Security boundary](#the-security-boundary) above. Fails with
 `InsufficientBalance` if `amount` exceeds the stream's current locked
 balance.
 
+<a id="refund"></a>
+
 ### `refund(env, caller: Address, to: Address, token: Address, amount: i128, stream_id: u64)`
+
 Identical mechanics and caller check to `release`; used when a cancelled
 stream's unstreamed remainder is returned to the sender.
 
 ### `balance_of_stream(env, stream_id: u64) -> i128`
+
 Read-only. Current locked balance attributed to a stream (0 if unknown).
 
 ### `total_locked(env, token: Address) -> i128`
+
 Read-only. Sum of every stream's locked balance in that token.
 
+<a id="set_stream_contract"></a>
+
 ### `set_stream_contract(env, admin: Address, new_contract: Address)`
+
 Admin-only. Repoints the address authorized to call `release`/`refund`,
 e.g. when upgrading the stream contract without redeploying (and thus
 without migrating) the vault. Requires `admin.require_auth()` and that
 `admin` matches the stored admin.
 
 ### `get_stream_contract(env) -> Address` / `get_admin(env) -> Address`
+
 Read-only accessors.
 
 ## Events

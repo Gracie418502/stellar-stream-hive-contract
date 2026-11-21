@@ -287,3 +287,28 @@ fn test_get_active_streams_filters_correctly() {
     assert_eq!(active.get(0).unwrap(), 1);
     assert_eq!(active.get(1).unwrap(), 3);
 }
+
+#[test]
+fn test_register_stream_stores_every_field_of_the_record() {
+    // Each input gets a distinct value, so a field that is dropped, swapped
+    // with another field, or defaulted would fail its own assertion.
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+    let stream_id: u64 = 42;
+    let amount: i128 = 7_500;
+
+    ctx.registry
+        .register_stream(&stream_id, &sender, &recipient, &token, &amount);
+
+    let record = ctx.registry.get_stream_record(&stream_id);
+    assert_eq!(record.stream_id, stream_id);
+    assert_eq!(record.sender, sender);
+    assert_eq!(record.recipient, recipient);
+    assert_eq!(record.token, token);
+    assert_eq!(record.amount, amount);
+    // Not a `register_stream` input: a new record starts with nothing withdrawn.
+    assert_eq!(record.withdrawn, 0);
+    assert_eq!(record.status, StreamStatus::Active);
+}

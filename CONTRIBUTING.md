@@ -4,17 +4,27 @@ Thanks for taking a look. This repo holds the three Soroban smart
 contracts (`vault`, `stream`, `registry`) that power Stellar Stream Hive's
 real-time payment streaming. Sister repos:
 
-- API/indexer: https://github.com/Stellar-Hive/stellar-stream-hive-api
-- Frontend: https://github.com/Stellar-Hive/stellar-stream-hive-frontend
+- API/indexer: <https://github.com/Stellar-Hive/stellar-stream-hive-api>
+- Frontend: <https://github.com/Stellar-Hive/stellar-stream-hive-frontend>
+
+## Dev container (optional)
+
+`.devcontainer/devcontainer.json` gives a ready-to-code environment in
+VS Code, GitHub Codespaces, or any Dev Containers client. It installs
+`just` and the Stellar CLI and adds the `wasm32v1-none` target. The Rust
+version comes from `rust-toolchain.toml`, which rustup applies on first use.
+The steps below do the same setup by hand.
 
 ## Local dev setup
 
-1. **Install Rust via rustup**: https://rustup.rs
+1. **Install Rust via rustup**: <https://rustup.rs>
 2. **Add the WASM target**, which is what contracts actually compile to
    for deployment:
+
    ```bash
    rustup target add wasm32v1-none
    ```
+
    Note: this is `wasm32v1-none`, not the older `wasm32-unknown-unknown`.
    `soroban-sdk` 27.x refuses to build for `wasm32-unknown-unknown` on
    Rust 1.82+ because that target now enables WASM reference-types and
@@ -23,11 +33,14 @@ real-time payment streaming. Sister repos:
    expects. This repo's `rust-toolchain.toml` already pins the right one.
 3. **Install the Stellar CLI**, used for local sandboxes, optimizing WASM,
    and deploying:
+
    ```bash
    cargo install stellar-cli --locked
    stellar --version
    ```
+
 4. **Clone and build**:
+
    ```bash
    git clone https://github.com/Stellar-Hive/stellar-stream-hive-contract.git
    cd stellar-stream-hive-contract
@@ -50,6 +63,18 @@ The `justfile` wraps the commands below: `just test`, `just fmt`, `just lint`, `
 `just wasm-hashes` (builds the WASMs and prints each one's path, size and sha256,
 via `scripts/build-wasm.sh`), and
 `just check` to run everything CI runs. Install [just](https://just.systems) to use it.
+
+| Recipe | What it runs |
+|---|---|
+| `just test` | `cargo test --workspace` |
+| `just test-one NAME` | Runs only tests whose name contains `NAME` |
+| `just fmt` | `cargo fmt --all` |
+| `just lint` | `cargo fmt --check` and clippy with CI's flags |
+| `just doc` | rustdoc for the workspace, with warnings as errors (matches CI's docs job) |
+| `just audit` | `cargo audit` (install with `cargo install cargo-audit --locked`) |
+| `just wasm` | Release build for the `wasm32v1-none` deployment target |
+| `just wasm-size` | Builds the contracts and prints each WASM artifact's size in bytes |
+| `just check` | `lint`, `test` and `wasm`, the same gates CI runs |
 
 ```bash
 # Run every test in the workspace (vault, stream, registry)
@@ -121,6 +146,33 @@ or refactor — the two `-A` exemptions above are the only ones CI makes.
 using `just`, run those three by hand as spelled out above and in
 "Build, test, deploy".
 
+## Releases
+
+Releases are automated by `.github/workflows/release.yml`. Pushing a tag that
+matches `v*` (for example `v1.2.0`) builds the three WASM contracts, then
+creates a GitHub release with:
+
+- `stellar_stream_hive_{vault,stream,registry}.wasm`
+- `SHA256SUMS`, so deployers can verify the files they download
+- the release notes copied from the matching `## [1.2.0]` section of
+  `CHANGELOG.md`. If no section matches, GitHub generates the notes instead.
+
+Tags containing a `-` (such as `v1.2.0-rc.1`) are marked as pre-releases.
+
+To cut a release:
+
+1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
+   `## [X.Y.Z]` heading and merge that change to `main`.
+2. Tag the merge commit and push the tag:
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+3. Check the run in the Actions tab and confirm the release assets and
+   checksums.
+
+Only the publish job has `contents: write`. Every other job runs read-only.
+
 ## Dependency audits
 
 `cargo audit` runs on every pull request and weekly on a schedule
@@ -133,6 +185,29 @@ rather than letting the job stay red: add the advisory id (e.g.
 comment explaining why it doesn't apply and, if there is one, a link to an
 upstream issue tracking a real fix. Never disable or remove the audit job to
 make a failure go away.
+
+## Optional: pre-commit hooks
+
+`.pre-commit-config.yaml` runs the same `cargo fmt --check` and clippy
+commands as CI before each commit. It is opt-in and nothing enforces it:
+
+```bash
+pip install pre-commit      # or: pipx install pre-commit
+pre-commit install          # adds the git hook to this clone
+pre-commit run --all-files  # optional: run every hook once now
+```
+
+CI remains the source of truth. Skip the hook for a single commit with
+`git commit --no-verify` if you need to.
+
+`cargo deny` runs on every pull request in the same workflow
+(`.github/workflows/audit.yml`). It checks the dependency licenses, banned
+crates, and crate sources against `deny.toml`. Duplicate crate versions are
+reported as warnings and do not fail the job. To check locally, install
+`cargo-deny` and run `cargo deny check licenses bans sources`. If a new
+dependency brings in a license that is not in the `allow` list, either
+choose a different dependency or add the SPDX id to `deny.toml` with a
+comment explaining why.
 
 ## The streaming math, explained
 
@@ -148,7 +223,7 @@ withdrawable   = streamed - withdrawn        (0 before cliff_ledger)
 **Worked example**: a stream of `90,000` units running from ledger
 `1,000` to `519,000` (no cliff). At ledger `260,000`:
 
-```
+```text
 elapsed        = min(260_000, 519_000) - 1_000 = 259_000
 total_duration = 519_000 - 1_000               = 518_000
 streamed       = 90_000 * 259_000 / 518_000    = 44_990   (rounds down)
@@ -220,6 +295,6 @@ non-linear curve) without disturbing existing streams:
 being checked, so a failing test is readable from the output alone.
 
 **Typed errors.** Use the generated `try_*` client methods, such as
-`try_create_stream`, when you need to assert on a specific erro
+`try_create_stream`, when you need to assert on a specific error.
 
-/* … truncated 2114 chars — edit only what you need near the top … */
+`/* … truncated 2114 chars — edit only what you need near the top … */`

@@ -8,7 +8,22 @@ on:
     # changed since the last PR.
     - cron: '0 6 * * 1'
 
+# Read-only by default; no job here needs to write to the repository.
+permissions:
+  contents: read
+
 jobs:
+  deny:
+    name: cargo deny (licenses, bans, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # License, banned-crate and source rules live in deny.toml. Advisories
+      # are checked by the cargo audit job below, not here.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest
