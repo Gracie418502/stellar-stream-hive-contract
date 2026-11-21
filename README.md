@@ -162,3 +162,6 @@ stream type.
 
 <!-- handsoff-issue-200 -->
 - #200: Test: `count_streams_by_recipient` after streams from several senders
+
+<!-- handsoff-issue-201 -->
+- #201: Test: a cancelled stream still appears in the sender and recipient lists
