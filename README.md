@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-184 -->
+- #184: Test: `cancel_stream` without the sender's authorization fails
