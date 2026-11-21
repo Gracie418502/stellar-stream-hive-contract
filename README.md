@@ -165,3 +165,6 @@ stream type.
 
 <!-- handsoff-issue-181 -->
 - #181: Test: a failed `create_stream` leaves no sender or recipient index entries
+
+<!-- handsoff-issue-182 -->
+- #182: Test: `create_stream` without the sender's authorization fails
