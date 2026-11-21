@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-200 -->
+- #200: Test: `count_streams_by_recipient` after streams from several senders
