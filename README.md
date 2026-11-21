@@ -165,3 +165,6 @@ stream type.
 
 <!-- handsoff-issue-205 -->
 - #205: Test: `release` moves the tokens to the `to` address
+
+<!-- handsoff-issue-206 -->
+- #206: Test: `refund` moves the tokens to the `to` address
