@@ -219,33 +219,34 @@ impl StreamContract {
     ///
     /// - `StreamError::StreamNotFound`: no stream exists with `stream_id`.
     /// - `StreamError::Unauthorized`: `recipient` is not the stream's recipient.
-    /// - `StreamError::MathOverflow`: the accrual or subtraction overflows.
-    pub fn withdraw_max(env: Env, recipient: Address, stream_id: u64) -> Result<i128, StreamError> {
+    /// - `StreamError::ExceedsWithdrawable`: nothing is withdrawable yet (e.g. before the cliff).
+    /// - `StreamError::MathOverflow`: the accrual or the `withdrawn` update overflows.
+    pub fn withdraw_max(env: Env, recipient: Address, stream_id: u64) -> Result<(), StreamError> {
         let stream = storage::get_stream(&env, stream_id).ok_or(StreamError::StreamNotFound)?;
         if stream.recipient != recipient {
             return Err(StreamError::Unauthorized);
         }
+
         let now = env.ledger().sequence();
-        let available = math::withdrawable_amount(&stream, now)?;
-        if available == 0 {
-            return Ok(0);
+        let amount = math::withdrawable_amount(&stream, now)?;
+        if amount <= 0 {
+            return Err(StreamError::ExceedsWithdrawable);
         }
-        Self::withdraw(env, recipient, stream_id, available)?;
-        Ok(available)
+
+        Self::withdraw(env, recipient, stream_id, amount)
     }
 
-    /// The sender cancels a cancellable stream. The recipient keeps
-    /// whatever has streamed so far (frozen at this ledger); the sender is
-    /// refunded the remainder.
+    /// Cancels a cancellable stream. The recipient keeps what has already
+    /// accrued; the sender is refunded the remainder.
     ///
     /// # Errors
     ///
     /// - `StreamError::StreamNotFound`: no stream exists with `stream_id`.
     /// - `StreamError::Unauthorized`: `sender` is not the stream's sender.
     /// - `StreamError::NotCancellable`: the stream was created with `cancellable = false`.
-    /// - `StreamError::AlreadyFinalized`: the stream is already cancelled or has run to completion.
-    /// - `StreamError::MathOverflow`: the refund arithmetic overflows.
-    pub fn cancel_stream(env: Env, sender: Address, stream_id: u64) -> Result<(), StreamError> {
+    /// - `StreamError::AlreadyCancelled`: the stream is already cancelled.
+    /// - `StreamError::MathOverflow`: the accrual or refund arithmetic overflows.
+    pub fn cancel(env: Env, sender: Address, stream_id: u64) -> Result<(), StreamError> {
         sender.require_auth();
 
         let mut stream = storage::get_stream(&env, stream_id).ok_or(StreamError::StreamNotFound)?;
@@ -255,36 +256,30 @@ impl StreamContract {
         if !stream.cancellable {
             return Err(StreamError::NotCancellable);
         }
-
-        let now = env.ledger().sequence();
-        let live_status = math::compute_status(&stream, now);
-        if live_status == StreamStatus::Cancelled || live_status == StreamStatus::Completed {
-            return Err(StreamError::AlreadyFinalized);
+        if stream.status == StreamStatus::Cancelled {
+            return Err(StreamError::AlreadyCancelled);
         }
 
-        // Mark the stream cancelled *before* computing the split so that the
-        // amount refunded to the sender and the amount the recipient can later
-        // withdraw come from the same function and cannot disagree. (Computing
-        // the recipient's share from raw accrual here while `withdrawable_amount`
-        // zeroes pre-cliff cancellations used to strand funds in the vault.)
+        let now = env.ledger().sequence();
+        let streamed = math::streamed_amount(&stream, now)?;
+        let refund = stream
+            .total_amount
+            .checked_sub(streamed)
+            .ok_or(StreamError::MathOverflow)?;
+
         stream.status = StreamStatus::Cancelled;
         stream.cancelled_at_ledger = now;
-        let streamed_now = math::streamed_amount(&stream, now)?;
-        let remainder = stream
-            .total_amount
-            .checked_sub(streamed_now)
-            .ok_or(StreamError::MathOverflow)?;
         storage::set_stream(&env, &stream);
 
-        if remainder > 0 {
-            let vault = storage::get_vault(&env).ok_or(StreamError::NotInitialized)?;
+        let vault = storage::get_vault(&env).ok_or(StreamError::NotInitialized)?;
+        if refund > 0 {
             vault_client::refund(
                 &env,
                 &vault,
                 &env.current_contract_address(),
                 &sender,
                 &stream.token,
-                remainder,
+                refund,
                 stream_id,
             );
         }
@@ -292,166 +287,76 @@ impl StreamContract {
         events::Cancel {
             stream_id,
             sender,
-            streamed_now,
-            remainder,
+            refund,
         }
         .publish(&env);
         Ok(())
     }
 
-    /// Returns the stream with its `status` freshly recomputed for the
-    /// current ledger.
-    ///
-    /// # Errors
-    ///
-    /// - `StreamError::StreamNotFound`: no stream exists with `stream_id`.
-    pub fn get_stream(env: Env, stream_id: u64) -> Result<Stream, StreamError> {
-        let mut stream = storage::get_stream(&env, stream_id).ok_or(StreamError::StreamNotFound)?;
-        let now = env.ledger().sequence();
-        stream.status = math::compute_status(&stream, now);
-        Ok(stream)
+    /// Returns the stream with `stream_id`, if it exists.
+    pub fn get_stream(env: Env, stream_id: u64) -> Option<Stream> {
+        storage::get_stream(&env, stream_id)
     }
 
-    /// Returns streams in creation order with `status` recomputed for the
-    /// current ledger.
-    pub fn get_streams_by_sender(env: Env, sender: Address) -> Vec<Stream> {
-        let ids = storage::get_sender_streams(&env, &sender);
-        Self::hydrate(&env, &ids)
-    }
-
-    /// All streams where `recipient` is the recipient.
-    pub fn get_streams_by_recipient(env: Env, recipient: Address) -> Vec<Stream> {
-        let ids = storage::get_recipient_streams(&env, &recipient);
-        Self::hydrate(&env, &ids)
-    }
-
-    /// The live, derived status of a stream.
-    ///
-    /// # Errors
-    ///
-    /// - `StreamError::StreamNotFound`: no stream exists with `stream_id`.
-    pub fn get_status(env: Env, stream_id: u64) -> Result<StreamStatus, StreamError> {
-        let stream = storage::get_stream(&env, stream_id).ok_or(StreamError::StreamNotFound)?;
-        let now = env.ledger().sequence();
-        Ok(math::compute_status(&stream, now))
-    }
-
-    /// Number of streams ever created with `sender` as the sender.
-    pub fn count_streams_by_sender(env: Env, sender: Address) -> u32 {
+    /// Number of streams created by `sender`.
+    pub fn sender_stream_count(env: Env, sender: Address) -> u32 {
         storage::get_sender_streams(&env, &sender).len()
     }
 
-    /// Number of streams ever created with `recipient` as the recipient.
-    pub fn count_streams_by_recipient(env: Env, recipient: Address) -> u32 {
+    /// Number of streams received by `recipient`.
+    pub fn recipient_stream_count(env: Env, recipient: Address) -> u32 {
         storage::get_recipient_streams(&env, &recipient).len()
     }
 
-    /// A page of `sender`'s streams in creation order. `limit` is capped at
-    /// [`MAX_PAGE_SIZE`]; an `offset` past the end returns an empty vec.
-    pub fn get_streams_by_sender_page(
+    /// A page of stream ids created by `sender`, starting at `offset`.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::InvalidPageSize`: `limit` is zero or greater than `MAX_PAGE_SIZE`.
+    pub fn get_sender_streams(
         env: Env,
         sender: Address,
         offset: u32,
         limit: u32,
-    ) -> Vec<Stream> {
-        let ids = storage::get_sender_streams(&env, &sender);
-        Self::hydrate(&env, &Self::slice(&env, &ids, offset, limit))
+    ) -> Result<Vec<u64>, StreamError> {
+        if limit == 0 || limit > MAX_PAGE_SIZE {
+            return Err(StreamError::InvalidPageSize);
+        }
+        let all = storage::get_sender_streams(&env, &sender);
+        Ok(paginate(&all, offset, limit))
     }
 
-    /// A page of `recipient`'s streams in creation order. See
-    /// `get_streams_by_sender_page` for the paging rules.
-    pub fn get_streams_by_recipient_page(
+    /// A page of stream ids received by `recipient`, starting at `offset`.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::InvalidPageSize`: `limit` is zero or greater than `MAX_PAGE_SIZE`.
+    pub fn get_recipient_streams(
         env: Env,
         recipient: Address,
         offset: u32,
         limit: u32,
-    ) -> Vec<Stream> {
-        let ids = storage::get_recipient_streams(&env, &recipient);
-        Self::hydrate(&env, &Self::slice(&env, &ids, offset, limit))
-    }
-
-    /// Admin only. Blocks `create_stream` until `unpause` is called.
-    /// Deliberately does NOT block `withdraw`, `withdraw_max` or
-    /// `cancel_stream`: pausing is an emergency brake on new deposits, never
-    /// a way to trap funds that are already streaming.
-    pub fn pause(env: Env) -> Result<(), StreamError> {
-        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
-        admin.require_auth();
-        storage::set_paused(&env, true);
-        events::Pause { admin }.publish(&env);
-        Ok(())
-    }
-
-    /// Admin only. Re-enables `create_stream`.
-    pub fn unpause(env: Env) -> Result<(), StreamError> {
-        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
-        admin.require_auth();
-        storage::set_paused(&env, false);
-        events::Unpause { admin }.publish(&env);
-        Ok(())
-    }
-
-    /// Whether new stream creation is currently paused.
-    pub fn is_paused(env: Env) -> bool {
-        storage::is_paused(&env)
-    }
-
-    /// Admin only. Hands the admin role to `new_admin`. Both the current
-    /// admin and the new admin must authorize, so the role can never be
-    /// transferred to an address nobody controls by mistake.
-    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), StreamError> {
-        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
-        admin.require_auth();
-        new_admin.require_auth();
-        storage::set_admin(&env, &new_admin);
-        events::AdminTransfer {
-            previous_admin: admin,
-            new_admin,
+    ) -> Result<Vec<u64>, StreamError> {
+        if limit == 0 || limit > MAX_PAGE_SIZE {
+            return Err(StreamError::InvalidPageSize);
         }
-        .publish(&env);
-        Ok(())
-    }
-
-    /// Read-only accessor for the admin address.
-    pub fn get_admin(env: Env) -> Result<Address, StreamError> {
-        storage::get_admin(&env).ok_or(StreamError::NotInitialized)
-    }
-
-    /// Read-only accessor for the configured vault address.
-    pub fn get_vault(env: Env) -> Result<Address, StreamError> {
-        storage::get_vault(&env).ok_or(StreamError::NotInitialized)
+        let all = storage::get_recipient_streams(&env, &recipient);
+        Ok(paginate(&all, offset, limit))
     }
 }
 
-impl StreamContract {
-    fn slice(env: &Env, ids: &Vec<u64>, offset: u32, limit: u32) -> Vec<u64> {
-        let limit = core::cmp::min(limit, MAX_PAGE_SIZE);
-        let end = core::cmp::min(offset.saturating_add(limit), ids.len());
-        let mut out = Vec::new(env);
-        let mut i = offset;
-        while i < end {
-            if let Some(id) = ids.get(i) {
-                out.push_back(id);
-            }
-            i += 1;
-        }
-        out
+/// Slices `all` to `[offset, offset + limit)`, clamping to the end.
+fn paginate(all: &Vec<u64>, offset: u32, limit: u32) -> Vec<u64> {
+    let mut page = Vec::new(all.env());
+    let len = all.len();
+    if offset >= len {
+        return page;
     }
-
-    fn hydrate(env: &Env, ids: &Vec<u64>) -> Vec<Stream> {
-        let now = env.ledger().sequence();
-        let mut out = Vec::new(env);
-        for id in ids.iter() {
-            if let Some(mut s) = storage::get_stream(env, id) {
-                s.status = math::compute_status(&s, now);
-                out.push_back(s);
-            }
-        }
-        out
+    let end = offset.saturating_add(limit).min(len);
+    let mut i = offset;
+    while i < end {
+        page.push_back(all.get_unchecked(i));
+        i += 1;
     }
+    page
 }
-
-// Re-exported so integration tests in sibling crates (and downstream
-// tooling) can name these types via `stellar_stream_hive_stream::...`.
-pub use error::StreamError as Error;
-pub use types::{Stream as StreamRecord, StreamStatus as Status};
