@@ -1,0 +1,22 @@
+# Opt-in local git hooks that run the same fmt and clippy gates as CI
+# (.github/workflows/ci.yml), so formatting and lint failures are caught
+# before a push. Install with: pip install pre-commit && pre-commit install
+# See CONTRIBUTING.md, "Optional: pre-commit hooks".
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: >
+          cargo clippy --workspace --all-targets -- -D warnings
+          -A clippy::too_many_arguments
+          -A clippy::needless_borrows_for_generic_args
+        language: system
+        types: [rust]
+        pass_filenames: false

@@ -75,6 +75,33 @@ deployment-time state.
 The addresses in the expected output are the same ones written to the table
 above. If a check disagrees with this file, trust the chain and open an issue.
 
+To run checks 1 to 4 in one command, use
+[`scripts/verify-deployment.sh`](scripts/verify-deployment.sh). It reads the
+ids from [`deployments/testnet.json`](deployments/testnet.json), so you don't
+need to export them. It needs the `stellar` CLI and `jq` on your `PATH`, and
+it exits non-zero on any mismatch:
+
+```bash
+scripts/verify-deployment.sh testnet <identity>
+```
+
+### Check the stream contract's wiring
+
+Checks 1 and 2 cover the vault's side of the wiring. These two read-only calls
+cover the stream contract's side: the vault it was initialized with, and its
+admin. `scripts/deploy.sh` and `scripts/verify-deployment.sh` do not run them,
+so run them by hand:
+
+```bash
+# 5. The stream contract was initialized with the vault
+stellar contract invoke --id $STREAM_ID --source <any identity> --network $NETWORK -- get_vault
+# expect: "CB67RYDOOIOR2YZERK77URMXDCOLDAVOFELZERDCH562OH2NMP2UNG2N"
+
+# 6. The stream contract's admin is the deployer
+stellar contract invoke --id $STREAM_ID --source <any identity> --network $NETWORK -- get_admin
+# expect: "GBLEJOG7B6ONTCL4F3T7F5G5NVYVKLLEMTV2C6XVZ7BF2ML4TUQVVZHI"
+```
+
 ### Compare WASM hashes
 
 The `wasm_sha256` column is the hash of each optimized WASM binary. To confirm

@@ -20,3 +20,8 @@ Thumbs.db
 .env.*
 # Soroban / Stellar CLI artefacts
 .stellar/
+
+# cargo-fuzz output (see fuzz/README.md)
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/target/
