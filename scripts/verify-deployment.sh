@@ -10,9 +10,15 @@
 #   - an identity configured for the network, used only to simulate the calls
 #
 # Usage:
-#   scripts/verify-deployment.sh [network] [source-identity]
+#   scripts/verify-deployment.sh [--json] [network] [source-identity]
 #
 #   scripts/verify-deployment.sh testnet deployer
+#   scripts/verify-deployment.sh --json testnet deployer
+#
+# With --json, stdout is a single JSON object (human text is not printed):
+#   {"network": "testnet", "status": "ok", "checks": [{"name": "...", "status": "ok"}]}
+# Each check status is "ok" or "failed"; "status" is "failed" if any check failed.
+# Mismatch details still go to stderr and the exit code is unchanged.
 #   scripts/verify-deployment.sh -h | --help
 
 set -euo pipefail
@@ -21,15 +27,21 @@ usage() {
   awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
 }
 
-case "${1:-}" in
-  -h | --help)
-    usage
-    exit 0
-    ;;
-esac
+JSON=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --json) JSON=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
 
-NETWORK="${1:-testnet}"
-SOURCE="${2:-deployer}"
+NETWORK="${ARGS[0]:-testnet}"
+SOURCE="${ARGS[1]:-deployer}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -65,26 +77,38 @@ unquote() {
 }
 
 FAILURES=0
+CHECKS='[]'
 
 check() {
-  local what="$1" actual="$2" expected="$3"
+  local what="$1" actual="$2" expected="$3" status
   if [ "$actual" = "$expected" ]; then
-    echo "ok: $what"
+    status="ok"
+    [ "$JSON" -eq 1 ] || echo "ok: $what"
   else
+    status="failed"
     echo "MISMATCH: $what is '$actual', expected '$expected'" >&2
     FAILURES=$((FAILURES + 1))
   fi
+  CHECKS="$(jq -c --arg name "$what" --arg status "$status" \
+    '. + [{name: $name, status: $status}]' <<<"$CHECKS")"
 }
 
-echo "== Verifying the '$NETWORK' deployment in $RECORD (as '$SOURCE') =="
+[ "$JSON" -eq 1 ] || echo "== Verifying the '$NETWORK' deployment in $RECORD (as '$SOURCE') =="
 
 check "vault admin" "$(invoke "$VAULT_ID" get_admin | unquote)" "$ADMIN"
 check "vault trusts the stream contract" "$(invoke "$VAULT_ID" get_stream_contract | unquote)" "$STREAM_ID"
 check "registry admin" "$(invoke "$REGISTRY_ID" get_admin | unquote)" "$ADMIN"
 check "stream contract is unpaused" "$(invoke "$STREAM_ID" is_paused | unquote)" "false"
 
+if [ "$JSON" -eq 1 ]; then
+  OVERALL="ok"
+  [ "$FAILURES" -eq 0 ] || OVERALL="failed"
+  jq -n --arg network "$NETWORK" --arg status "$OVERALL" --argjson checks "$CHECKS" \
+    '{network: $network, status: $status, checks: $checks}'
+fi
+
 if [ "$FAILURES" -gt 0 ]; then
   die "$FAILURES check(s) failed"
 fi
 
-echo "== Deployment verified =="
+[ "$JSON" -eq 1 ] || echo "== Deployment verified =="
