@@ -119,6 +119,33 @@ or refactor — the two `-A` exemptions above are the only ones CI makes.
 using `just`, run those three by hand as spelled out above and in
 "Build, test, deploy".
 
+## Releases
+
+Releases are automated by `.github/workflows/release.yml`. Pushing a tag that
+matches `v*` (for example `v1.2.0`) builds the three WASM contracts, then
+creates a GitHub release with:
+
+- `stellar_stream_hive_{vault,stream,registry}.wasm`
+- `SHA256SUMS`, so deployers can verify the files they download
+- the release notes copied from the matching `## [1.2.0]` section of
+  `CHANGELOG.md`. If no section matches, GitHub generates the notes instead.
+
+Tags containing a `-` (such as `v1.2.0-rc.1`) are marked as pre-releases.
+
+To cut a release:
+
+1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
+   `## [X.Y.Z]` heading and merge that change to `main`.
+2. Tag the merge commit and push the tag:
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+3. Check the run in the Actions tab and confirm the release assets and
+   checksums.
+
+Only the publish job has `contents: write`. Every other job runs read-only.
+
 ## Dependency audits
 
 `cargo audit` runs on every pull request and weekly on a schedule
