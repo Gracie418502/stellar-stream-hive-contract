@@ -168,3 +168,6 @@ stream type.
 
 <!-- handsoff-issue-186 -->
 - #186: Test: the old admin cannot pause after `transfer_admin`
+
+<!-- handsoff-issue-187 -->
+- #187: Test: pausing twice and unpausing when not paused
