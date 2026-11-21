@@ -1744,6 +1744,7 @@ name = "stellar-stream-hive-stream"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
+ "stellar-stream-hive-vault",
 ]
 
 [[package]]
