@@ -165,3 +165,6 @@ stream type.
 
 <!-- handsoff-issue-185 -->
 - #185: Test: `initialize` requires the admin's authorization
+
+<!-- handsoff-issue-186 -->
+- #186: Test: the old admin cannot pause after `transfer_admin`
