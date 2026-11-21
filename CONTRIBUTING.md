@@ -4,8 +4,8 @@ Thanks for taking a look. This repo holds the three Soroban smart
 contracts (`vault`, `stream`, `registry`) that power Stellar Stream Hive's
 real-time payment streaming. Sister repos:
 
-- API/indexer: https://github.com/Stellar-Hive/stellar-stream-hive-api
-- Frontend: https://github.com/Stellar-Hive/stellar-stream-hive-frontend
+- API/indexer: <https://github.com/Stellar-Hive/stellar-stream-hive-api>
+- Frontend: <https://github.com/Stellar-Hive/stellar-stream-hive-frontend>
 
 ## Dev container (optional)
 
@@ -17,12 +17,14 @@ The steps below do the same setup by hand.
 
 ## Local dev setup
 
-1. **Install Rust via rustup**: https://rustup.rs
+1. **Install Rust via rustup**: <https://rustup.rs>
 2. **Add the WASM target**, which is what contracts actually compile to
    for deployment:
+
    ```bash
    rustup target add wasm32v1-none
    ```
+
    Note: this is `wasm32v1-none`, not the older `wasm32-unknown-unknown`.
    `soroban-sdk` 27.x refuses to build for `wasm32-unknown-unknown` on
    Rust 1.82+ because that target now enables WASM reference-types and
@@ -31,11 +33,14 @@ The steps below do the same setup by hand.
    expects. This repo's `rust-toolchain.toml` already pins the right one.
 3. **Install the Stellar CLI**, used for local sandboxes, optimizing WASM,
    and deploying:
+
    ```bash
    cargo install stellar-cli --locked
    stellar --version
    ```
+
 4. **Clone and build**:
+
    ```bash
    git clone https://github.com/Stellar-Hive/stellar-stream-hive-contract.git
    cd stellar-stream-hive-contract
@@ -216,7 +221,7 @@ withdrawable   = streamed - withdrawn        (0 before cliff_ledger)
 **Worked example**: a stream of `90,000` units running from ledger
 `1,000` to `519,000` (no cliff). At ledger `260,000`:
 
-```
+```text
 elapsed        = min(260_000, 519_000) - 1_000 = 259_000
 total_duration = 519_000 - 1_000               = 518_000
 streamed       = 90_000 * 259_000 / 518_000    = 44_990   (rounds down)
@@ -288,6 +293,6 @@ non-linear curve) without disturbing existing streams:
 being checked, so a failing test is readable from the output alone.
 
 **Typed errors.** Use the generated `try_*` client methods, such as
-`try_create_stream`, when you need to assert on a specific erro
+`try_create_stream`, when you need to assert on a specific error.
 
-/* … truncated 2114 chars — edit only what you need near the top … */
+`/* … truncated 2114 chars — edit only what you need near the top … */`

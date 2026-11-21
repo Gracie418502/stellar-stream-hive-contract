@@ -130,9 +130,11 @@ storage. `Cancelled` is persisted by `cancel_stream`. A stream that has
 ## Function reference
 
 ### `initialize(env, admin, vault)`
+
 One-time setup, requires `admin.require_auth()`.
 
 ### `create_stream(env, sender, recipient, token, total_amount, start_ledger, end_ledger, cliff_ledger, cancellable) -> u64`
+
 Requires `sender.require_auth()`. Validates `total_amount > 0`,
 `end_ledger > start_ledger`, and `start_ledger <= cliff_ledger <=
 end_ledger`. Deposits `total_amount` into the vault, stores the new
@@ -140,24 +142,29 @@ end_ledger`. Deposits `total_amount` into the vault, stores the new
 Emits a `create` event.
 
 ### `streamed_amount(env, stream_id) -> i128`
+
 Read-only. See [formula](#the-streaming-formula) above.
 
 ### `withdrawable_amount(env, stream_id) -> i128`
+
 Read-only. `streamed_amount - withdrawn`, floored at 0, and forced to 0
 before `cliff_ledger`.
 
 ### `withdraw(env, recipient, stream_id, amount)`
+
 Requires `recipient.require_auth()` and that the caller is the stream's
 recipient. Rejects `amount` greater than `withdrawable_amount`
 (`ExceedsWithdrawable`). Instructs the vault to `release` the funds.
 Emits a `withdraw` event.
 
 ### `withdraw_max(env, recipient, stream_id) -> i128`
+
 Convenience wrapper around `withdraw` that pulls the entire currently
 withdrawable balance and returns the amount withdrawn (0 if nothing was
 available — this is not an error).
 
 ### `cancel_stream(env, sender, stream_id)`
+
 Requires `sender.require_auth()` and that the caller is the stream's
 sender. Fails with `NotCancellable` if the stream was created with
 `cancellable = false`, and `AlreadyFinalized` if the stream is already
@@ -166,39 +173,48 @@ sender. Fails with `NotCancellable` if the stream was created with
 remainder to the sender via the vault, and emits a `cancel` event.
 
 ### `get_stream(env, stream_id) -> Stream`
+
 Read-only, with `status` recomputed live.
 
 ### `get_streams_by_sender(env, sender) -> Vec<Stream>` / `get_streams_by_recipient(env, recipient) -> Vec<Stream>`
+
 Read-only, indexed lookups.
 
 ### `count_streams_by_sender(env, sender) -> u32` / `count_streams_by_recipient(env, recipient) -> u32`
+
 Read-only. Number of streams ever created for that party.
 
 ### `get_streams_by_sender_page(env, sender, offset, limit) -> Vec<Stream>` / `get_streams_by_recipient_page(env, recipient, offset, limit) -> Vec<Stream>`
+
 Read-only, creation-ordered pages. `limit` is capped at `MAX_PAGE_SIZE`
 (50) so a single call can never be forced to hydrate an unbounded number of
 streams; an `offset` past the end returns an empty vec. Prefer these over
 `get_streams_by_*` for any address that may accumulate many streams.
 
 ### `get_status(env, stream_id) -> StreamStatus`
+
 Read-only, live-computed status.
 
 ### `pause(env)` / `unpause(env)` / `is_paused(env) -> bool`
+
 `pause` and `unpause` require the admin's authorization. While paused,
 `create_stream` fails with `Paused`. **Pausing never blocks `withdraw`,
 `withdraw_max` or `cancel_stream`** -- it is an emergency brake on new
 deposits, not a way to trap funds that are already streaming.
 
 ### `get_admin(env) -> Address`
+
 Read-only. Returns the current admin address. No authorization required.
 Fails with `NotInitialized` if `initialize` has not been called.
 
 ### `get_vault(env) -> Address`
+
 Read-only. Returns the vault contract address set during `initialize`. No
 authorization required. Fails with `NotInitialized` if `initialize` has not
 been called.
 
 ### `transfer_admin(env, new_admin)`
+
 Requires authorization from **both** the current admin and `new_admin`, so
 the role cannot be handed to an address nobody controls by mistake.
 

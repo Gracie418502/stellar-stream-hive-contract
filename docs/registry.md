@@ -46,10 +46,12 @@ storage.
 ## Function reference
 
 ### `initialize(env, admin)`
+
 One-time setup, requires `admin.require_auth()`. Initializes `RegistryStats`
 to all zeros.
 
 ### `register_stream(env, stream_id, sender, recipient, token, amount)`
+
 Records a newly created stream. New streams are recorded with status
 `Active` by convention (this contract has no visibility into a stream's
 `start_ledger`/`cliff_ledger`, since those aren't part of this function's
@@ -58,30 +60,37 @@ signature — `update_stream` can correct the status later, e.g. back to
 `AlreadyRegistered` if `stream_id` was already registered.
 
 ### `update_stream(env, stream_id, withdrawn, status)`
+
 Updates a stream's withdrawn amount and status, adjusting
 `active_streams` and `total_withdrawn` accordingly. Fails with
 `StreamNotFound` if the id was never registered.
 
 ### `get_all_streams(env) -> Vec<u64>`
+
 Every registered stream id, in registration order. Reads one ledger entry
 per stream, so on a large registry prefer the paged accessors below.
 
 ### `stream_count(env) -> u32`
+
 Number of streams ever registered.
 
 ### `get_streams_page(env, offset, limit) -> Vec<u64>`
+
 A registration-ordered page of ids. `limit` is capped at `MAX_PAGE_SIZE`
 (50); an `offset` past the end returns an empty vec.
 
 ### `get_stats(env) -> RegistryStats`
+
 The current aggregate snapshot.
 
 ### `get_active_streams(env) -> Vec<u64>`
+
 Ids of every stream whose last-known status is `Active`. Like
 `get_all_streams`, it reads one ledger entry per registered stream, so on a
 large registry prefer the paged accessors above.
 
 ### `get_stream_record(env, stream_id) -> StreamRecord`
+
 Read-only accessor for a single stream's registry-side summary.
 
 ## Events
