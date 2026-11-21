@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-194 -->
+- #194: Test: `get_stream` after a cancel reports `Cancelled` and `cancelled_at_ledger`
