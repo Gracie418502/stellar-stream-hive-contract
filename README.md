@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-204 -->
+- #204: Test: vault `balance_of_stream` and `total_locked` for unknown inputs
