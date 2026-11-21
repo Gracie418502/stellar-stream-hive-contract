@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-180 -->
+- #180: Test: a failed `create_stream` does not consume a stream id
