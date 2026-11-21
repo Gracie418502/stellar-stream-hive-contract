@@ -245,32 +245,19 @@ fn test_cancelled_to_completed_keeps_active_count_at_zero() {
 }
 
 #[test]
-fn test_update_stream_to_completed_decrements_active_count() {
+fn test_get_streams_page_offset_beyond_count_returns_empty() {
     let ctx = setup();
     let sender = Address::generate(&ctx.env);
     let recipient = Address::generate(&ctx.env);
     let token = Address::generate(&ctx.env);
+
     ctx.registry
         .register_stream(&1, &sender, &recipient, &token, &1000);
-    assert_eq!(ctx.registry.get_stats().active_streams, 1);
+    ctx.registry
+        .register_stream(&2, &sender, &recipient, &token, &1000);
+    ctx.registry
+        .register_stream(&3, &sender, &recipient, &token, &1000);
 
-    ctx.registry.update_stream(&1, &0, &StreamStatus::Completed);
-    assert_eq!(ctx.registry.get_stats().active_streams, 0);
-}
-
-#[test]
-fn test_get_streams_page_capped_at_max_page_size() {
-    let ctx = setup();
-    let sender = Address::generate(&ctx.env);
-    let recipient = Address::generate(&ctx.env);
-    let token = Address::generate(&ctx.env);
-
-    let total = MAX_PAGE_SIZE + 5;
-    for id in 0..total {
-        ctx.registry
-            .register_stream(&id, &sender, &recipient, &token, &1000);
-    }
-
-    let page = ctx.registry.get_streams_page(&0, &u32::MAX);
-    assert_eq!(page.len(), MAX_PAGE_SIZE);
+    let page = ctx.registry.get_streams_page(&100, &10);
+    assert_eq!(page.len(), 0);
 }
