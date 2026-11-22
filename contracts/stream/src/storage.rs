@@ -21,9 +21,9 @@ use crate::types::Stream;
 
 /// Extend an entry's TTL once it is at or below this many ledgers
 /// (~7 days at 5s ledgers).
-const LEDGER_THRESHOLD: u32 = 120_960;
+pub const LEDGER_THRESHOLD: u32 = 120_960;
 /// Extend an entry's TTL to this many ledgers (~14 days at 5s ledgers).
-const LEDGER_BUMP: u32 = 241_920;
+pub const LEDGER_BUMP: u32 = 241_920;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

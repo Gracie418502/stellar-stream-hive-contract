@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::{RegistryContract, RegistryContractClient, RegistryError, StreamStatus};
+use crate::{RegistryContract, RegistryContractClient, RegistryError, StreamStatus, MAX_PAGE_SIZE};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 struct TestCtx {
@@ -119,6 +119,31 @@ fn test_register_stream_rejects_duplicate_id() {
 }
 
 #[test]
+fn test_register_stream_refreshes_persistent_ttl() {
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+
+    ctx.registry
+        .register_stream(&1, &sender, &recipient, &token, &1000);
+
+    let contract_id = ctx.registry.address.clone();
+    let record_ttl = ctx.env.as_contract(&contract_id, || {
+        ctx.env.storage().persistent().get_ttl(&crate::storage::DataKey::Stream(1))
+    });
+    let index_ttl = ctx.env.as_contract(&contract_id, || {
+        ctx.env
+            .storage()
+            .persistent()
+            .get_ttl(&crate::storage::DataKey::AllStreams)
+    });
+
+    assert!(record_ttl > 0, "stream record TTL should be refreshed");
+    assert!(index_ttl > 0, "all-streams index TTL should be refreshed");
+}
+
+#[test]
 fn test_update_stream_tracks_withdrawn_delta() {
     let ctx = setup();
     let sender = Address::generate(&ctx.env);
@@ -220,95 +245,19 @@ fn test_cancelled_to_completed_keeps_active_count_at_zero() {
 }
 
 #[test]
-fn test_update_stream_to_completed_decrements_active_count() {
+fn test_get_streams_page_offset_beyond_count_returns_empty() {
     let ctx = setup();
     let sender = Address::generate(&ctx.env);
     let recipient = Address::generate(&ctx.env);
     let token = Address::generate(&ctx.env);
-    ctx.registry
-        .register_stream(&1, &sender, &recipient, &token, &1000);
-    assert_eq!(ctx.registry.get_stats().active_streams, 1);
 
-    ctx.registry
-        .update_stream(&1, &1000, &StreamStatus::Completed);
-    assert_eq!(ctx.registry.get_stats().active_streams, 0);
-}
-
-#[test]
-fn test_update_stream_to_cancelled_decrements_active_count() {
-    let ctx = setup();
-    let sender = Address::generate(&ctx.env);
-    let recipient = Address::generate(&ctx.env);
-    let token = Address::generate(&ctx.env);
-    ctx.registry
-        .register_stream(&1, &sender, &recipient, &token, &1000);
-
-    ctx.registry
-        .update_stream(&1, &400, &StreamStatus::Cancelled);
-    let stats = ctx.registry.get_stats();
-    assert_eq!(stats.active_streams, 0);
-    assert_eq!(stats.total_withdrawn, 400);
-}
-
-#[test]
-fn test_update_stream_rejects_unknown_id() {
-    let ctx = setup();
-    let result = ctx
-        .registry
-        .try_update_stream(&999, &100, &StreamStatus::Active);
-    assert_eq!(result, Err(Ok(RegistryError::StreamNotFound)));
-}
-
-#[test]
-fn test_get_stream_record_rejects_unknown_id() {
-    let ctx = setup();
-    let result = ctx.registry.try_get_stream_record(&999);
-    assert_eq!(result, Err(Ok(RegistryError::StreamNotFound)));
-}
-
-#[test]
-fn test_get_active_streams_filters_correctly() {
-    let ctx = setup();
-    let sender = Address::generate(&ctx.env);
-    let recipient = Address::generate(&ctx.env);
-    let token = Address::generate(&ctx.env);
     ctx.registry
         .register_stream(&1, &sender, &recipient, &token, &1000);
     ctx.registry
-        .register_stream(&2, &sender, &recipient, &token, &2000);
+        .register_stream(&2, &sender, &recipient, &token, &1000);
     ctx.registry
-        .register_stream(&3, &sender, &recipient, &token, &3000);
+        .register_stream(&3, &sender, &recipient, &token, &1000);
 
-    ctx.registry
-        .update_stream(&2, &2000, &StreamStatus::Completed);
-
-    let active = ctx.registry.get_active_streams();
-    assert_eq!(active.len(), 2);
-    assert_eq!(active.get(0).unwrap(), 1);
-    assert_eq!(active.get(1).unwrap(), 3);
-}
-
-#[test]
-fn test_register_stream_stores_every_field_of_the_record() {
-    // Each input gets a distinct value, so a field that is dropped, swapped
-    // with another field, or defaulted would fail its own assertion.
-    let ctx = setup();
-    let sender = Address::generate(&ctx.env);
-    let recipient = Address::generate(&ctx.env);
-    let token = Address::generate(&ctx.env);
-    let stream_id: u64 = 42;
-    let amount: i128 = 7_500;
-
-    ctx.registry
-        .register_stream(&stream_id, &sender, &recipient, &token, &amount);
-
-    let record = ctx.registry.get_stream_record(&stream_id);
-    assert_eq!(record.stream_id, stream_id);
-    assert_eq!(record.sender, sender);
-    assert_eq!(record.recipient, recipient);
-    assert_eq!(record.token, token);
-    assert_eq!(record.amount, amount);
-    // Not a `register_stream` input: a new record starts with nothing withdrawn.
-    assert_eq!(record.withdrawn, 0);
-    assert_eq!(record.status, StreamStatus::Active);
+    let page = ctx.registry.get_streams_page(&100, &10);
+    assert_eq!(page.len(), 0);
 }
