@@ -160,5 +160,14 @@ stream type.
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
 
-<!-- handsoff-issue-194 -->
-- #194: Test: `get_stream` after a cancel reports `Cancelled` and `cancelled_at_ledger`
+<!-- handsoff-issue-184 -->
+- #184: Test: `cancel_stream` without the sender's authorization fails
+
+<!-- handsoff-issue-185 -->
+- #185: Test: `initialize` requires the admin's authorization
+
+<!-- handsoff-issue-186 -->
+- #186: Test: the old admin cannot pause after `transfer_admin`
+
+<!-- handsoff-issue-187 -->
+- #187: Test: pausing twice and unpausing when not paused
