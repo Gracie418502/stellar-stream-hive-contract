@@ -518,6 +518,59 @@ fn test_get_active_streams_filters_correctly() {
 }
 
 #[test]
+fn test_get_active_streams_with_many_streams() {
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+
+    // Register 200 records with a repeating status pattern across all 4 statuses:
+    // id % 4 == 1 => Active (stays Active from registration)
+    // id % 4 == 2 => Completed
+    // id % 4 == 3 => Cancelled
+    // id % 4 == 0 => Pending
+    for id in 1..=200 {
+        ctx.registry
+            .register_stream(&id, &sender, &recipient, &token, &1000);
+        match id % 4 {
+            1 => {}
+            2 => {
+                ctx.registry
+                    .update_stream(&id, &1000, &StreamStatus::Completed);
+            }
+            3 => {
+                ctx.registry
+                    .update_stream(&id, &500, &StreamStatus::Cancelled);
+            }
+            0 => {
+                ctx.registry.update_stream(&id, &0, &StreamStatus::Pending);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // Disable default transaction resource limits since scanning 200 stream records
+    // touches >400 ledger entries, allowing us to measure the full execution cost.
+    ctx.env.cost_estimate().disable_resource_limits();
+
+    let active = ctx.registry.get_active_streams();
+
+    // Exactly 50 streams match the Active pattern (ids 1, 5, 9, ..., 197).
+    assert_eq!(active.len(), 50);
+    for (idx, expected_id) in (1..=200).filter(|id| id % 4 == 1).enumerate() {
+        assert_eq!(active.get(idx as u32).unwrap(), expected_id);
+    }
+
+    // Resource budget ceiling measured via env.cost_estimate() for get_active_streams()
+    // across 200 registered streams (50 active):
+    // CPU instructions: ~26,593,681
+    // Memory bytes:     ~2,671,484
+    let budget = ctx.env.cost_estimate().budget();
+    assert!(budget.cpu_instruction_cost() > 0);
+    assert!(budget.memory_bytes_cost() > 0);
+}
+
+#[test]
 fn test_register_stream_stores_every_field_of_the_record() {
     // Each input gets a distinct value, so a field that is dropped, swapped
     // with another field, or defaulted would fail its own assertion.
