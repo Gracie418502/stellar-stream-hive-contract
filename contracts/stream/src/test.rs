@@ -5,7 +5,7 @@ use crate::types::StreamStatus;
 use crate::{StreamContract, StreamContractClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    token, Address, Env, IntoVal,
+    token, Address, Env,
 };
 
 /// A minimal stand-in for the real vault contract, used only so the stream
@@ -1873,4 +1873,71 @@ fn test_create_stream_authorization_tree_includes_token_transfer() {
         ))
     );
     assert_eq!(transfer_inv.sub_invocations.len(), 0);
+}
+
+#[test]
+fn test_resource_budget_of_create_stream_withdraw_and_cancel_stream() {
+    let ctx = setup();
+
+    // 1. create_stream
+    let id = create_default_stream(&ctx, true);
+    let budget_create = ctx.env.cost_estimate().budget();
+    let cpu_create = budget_create.cpu_instruction_cost();
+    let mem_create = budget_create.memory_bytes_cost();
+
+    // Generous upper bounds chosen from baseline numbers:
+    // - create_stream: ~505k CPU instructions, ~194k memory bytes (limit: 1_000_000 CPU, 400_000 memory)
+    // - withdraw:      ~440k CPU instructions, ~165k memory bytes (limit:   900_000 CPU, 350_000 memory)
+    // - cancel_stream: ~437k CPU instructions, ~159k memory bytes (limit:   900_000 CPU, 350_000 memory)
+    //
+    // How to update limits:
+    // If contract logic changes intentionally increase resource consumption, inspect the new
+    // invocation costs with `ctx.env.cost_estimate().budget().cpu_instruction_cost()` and
+    // `ctx.env.cost_estimate().budget().memory_bytes_cost()` after each call and update
+    // these thresholds to remain ~50-100% above the observed values.
+    assert!(
+        cpu_create <= 1_000_000,
+        "create_stream CPU cost exceeded limit: {}",
+        cpu_create
+    );
+    assert!(
+        mem_create <= 400_000,
+        "create_stream memory cost exceeded limit: {}",
+        mem_create
+    );
+
+    // 2. withdraw at midpoint
+    set_ledger(&ctx, START + (END - START) / 2);
+    ctx.stream.withdraw(&ctx.recipient, &id, &(AMOUNT / 4));
+    let budget_withdraw = ctx.env.cost_estimate().budget();
+    let cpu_withdraw = budget_withdraw.cpu_instruction_cost();
+    let mem_withdraw = budget_withdraw.memory_bytes_cost();
+
+    assert!(
+        cpu_withdraw <= 900_000,
+        "withdraw CPU cost exceeded limit: {}",
+        cpu_withdraw
+    );
+    assert!(
+        mem_withdraw <= 350_000,
+        "withdraw memory cost exceeded limit: {}",
+        mem_withdraw
+    );
+
+    // 3. cancel_stream
+    ctx.stream.cancel_stream(&ctx.sender, &id);
+    let budget_cancel = ctx.env.cost_estimate().budget();
+    let cpu_cancel = budget_cancel.cpu_instruction_cost();
+    let mem_cancel = budget_cancel.memory_bytes_cost();
+
+    assert!(
+        cpu_cancel <= 900_000,
+        "cancel_stream CPU cost exceeded limit: {}",
+        cpu_cancel
+    );
+    assert!(
+        mem_cancel <= 350_000,
+        "cancel_stream memory cost exceeded limit: {}",
+        mem_cancel
+    );
 }
