@@ -272,6 +272,214 @@ fn test_update_stream_to_cancelled_decrements_active_count() {
 }
 
 #[test]
+fn test_registry_stats_after_mix_of_register_and_update() {
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+
+    enum Action {
+        Register {
+            id: u64,
+            amount: i128,
+        },
+        Update {
+            id: u64,
+            withdrawn: i128,
+            status: StreamStatus,
+        },
+    }
+
+    struct Step {
+        action: Action,
+        expected_total_streams: u64,
+        expected_active_streams: u64,
+        expected_total_streamed: i128,
+        expected_total_withdrawn: i128,
+    }
+
+    let steps = [
+        // 1. Register stream 1 (Active by default)
+        Step {
+            action: Action::Register {
+                id: 1,
+                amount: 1000,
+            },
+            expected_total_streams: 1,
+            expected_active_streams: 1,
+            expected_total_streamed: 1000,
+            expected_total_withdrawn: 0,
+        },
+        // 2. Update stream 1 to Pending (was Active -> active decreases)
+        Step {
+            action: Action::Update {
+                id: 1,
+                withdrawn: 100,
+                status: StreamStatus::Pending,
+            },
+            expected_total_streams: 1,
+            expected_active_streams: 0,
+            expected_total_streamed: 1000,
+            expected_total_withdrawn: 100,
+        },
+        // 3. Register stream 2 (Active by default)
+        Step {
+            action: Action::Register {
+                id: 2,
+                amount: 2000,
+            },
+            expected_total_streams: 2,
+            expected_active_streams: 1,
+            expected_total_streamed: 3000,
+            expected_total_withdrawn: 100,
+        },
+        // 4. Update stream 2 while keeping Active (total_withdrawn increases by 500)
+        Step {
+            action: Action::Update {
+                id: 2,
+                withdrawn: 500,
+                status: StreamStatus::Active,
+            },
+            expected_total_streams: 2,
+            expected_active_streams: 1,
+            expected_total_streamed: 3000,
+            expected_total_withdrawn: 600,
+        },
+        // 5. Register stream 3 (Active by default)
+        Step {
+            action: Action::Register {
+                id: 3,
+                amount: 3000,
+            },
+            expected_total_streams: 3,
+            expected_active_streams: 2,
+            expected_total_streamed: 6000,
+            expected_total_withdrawn: 600,
+        },
+        // 6. Update stream 1 back to Active (was Pending -> active increases)
+        Step {
+            action: Action::Update {
+                id: 1,
+                withdrawn: 300,
+                status: StreamStatus::Active,
+            },
+            expected_total_streams: 3,
+            expected_active_streams: 3,
+            expected_total_streamed: 6000,
+            expected_total_withdrawn: 800,
+        },
+        // 7. Update stream 2 to Completed (was Active -> active decreases)
+        Step {
+            action: Action::Update {
+                id: 2,
+                withdrawn: 2000,
+                status: StreamStatus::Completed,
+            },
+            expected_total_streams: 3,
+            expected_active_streams: 2,
+            expected_total_streamed: 6000,
+            expected_total_withdrawn: 2300,
+        },
+        // 8. Update stream 3 to Cancelled (was Active -> active decreases)
+        Step {
+            action: Action::Update {
+                id: 3,
+                withdrawn: 1200,
+                status: StreamStatus::Cancelled,
+            },
+            expected_total_streams: 3,
+            expected_active_streams: 1,
+            expected_total_streamed: 6000,
+            expected_total_withdrawn: 3500,
+        },
+        // 9. Register stream 4 (Active by default)
+        Step {
+            action: Action::Register {
+                id: 4,
+                amount: 1500,
+            },
+            expected_total_streams: 4,
+            expected_active_streams: 2,
+            expected_total_streamed: 7500,
+            expected_total_withdrawn: 3500,
+        },
+        // 10. Update stream 4 to Pending (was Active -> active decreases)
+        Step {
+            action: Action::Update {
+                id: 4,
+                withdrawn: 200,
+                status: StreamStatus::Pending,
+            },
+            expected_total_streams: 4,
+            expected_active_streams: 1,
+            expected_total_streamed: 7500,
+            expected_total_withdrawn: 3700,
+        },
+        // 11. Update stream 4 from Pending to Completed (active stays 1)
+        Step {
+            action: Action::Update {
+                id: 4,
+                withdrawn: 600,
+                status: StreamStatus::Completed,
+            },
+            expected_total_streams: 4,
+            expected_active_streams: 1,
+            expected_total_streamed: 7500,
+            expected_total_withdrawn: 4100,
+        },
+        // 12. Update stream 1 to Cancelled (was Active -> active drops to 0)
+        Step {
+            action: Action::Update {
+                id: 1,
+                withdrawn: 1000,
+                status: StreamStatus::Cancelled,
+            },
+            expected_total_streams: 4,
+            expected_active_streams: 0,
+            expected_total_streamed: 7500,
+            expected_total_withdrawn: 4800,
+        },
+    ];
+
+    for (i, step) in steps.iter().enumerate() {
+        match &step.action {
+            Action::Register { id, amount } => {
+                ctx.registry
+                    .register_stream(id, &sender, &recipient, &token, amount);
+            }
+            Action::Update {
+                id,
+                withdrawn,
+                status,
+            } => {
+                ctx.registry.update_stream(id, withdrawn, status);
+            }
+        }
+        let stats = ctx.registry.get_stats();
+        assert_eq!(
+            stats.total_streams, step.expected_total_streams,
+            "step {} total_streams mismatch",
+            i
+        );
+        assert_eq!(
+            stats.active_streams, step.expected_active_streams,
+            "step {} active_streams mismatch",
+            i
+        );
+        assert_eq!(
+            stats.total_streamed, step.expected_total_streamed,
+            "step {} total_streamed mismatch",
+            i
+        );
+        assert_eq!(
+            stats.total_withdrawn, step.expected_total_withdrawn,
+            "step {} total_withdrawn mismatch",
+            i
+        );
+    }
+}
+
+#[test]
 fn test_update_stream_rejects_unknown_id() {
     let ctx = setup();
     let result = ctx
