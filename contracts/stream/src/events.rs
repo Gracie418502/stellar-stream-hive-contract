@@ -47,6 +47,10 @@ pub struct Unpause {
 }
 
 /// Emitted when the admin role is handed to a new address.
+///
+/// This also fires when the admin is transferred to the current admin
+/// (a no-op self-transfer), so tests can assert the event is emitted
+/// even though the stored admin value does not change.
 #[contractevent(data_format = "vec")]
 pub struct AdminTransfer {
     pub previous_admin: Address,
