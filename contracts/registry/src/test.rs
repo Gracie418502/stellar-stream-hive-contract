@@ -65,6 +65,27 @@ fn test_register_stream_adds_to_all_streams() {
 }
 
 #[test]
+fn test_get_all_streams_preserves_insertion_order() {
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+
+    ctx.registry
+        .register_stream(&5, &sender, &recipient, &token, &1000);
+    ctx.registry
+        .register_stream(&2, &sender, &recipient, &token, &2000);
+    ctx.registry
+        .register_stream(&9, &sender, &recipient, &token, &3000);
+
+    let all = ctx.registry.get_all_streams();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all.get(0).unwrap(), 5);
+    assert_eq!(all.get(1).unwrap(), 2);
+    assert_eq!(all.get(2).unwrap(), 9);
+}
+
+#[test]
 fn test_register_stream_updates_stats() {
     let ctx = setup();
     let sender = Address::generate(&ctx.env);
