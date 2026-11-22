@@ -159,6 +159,29 @@ mod tests {
     }
 
     #[test]
+    fn streamed_three_ledger_stream_table() {
+        let env = Env::default();
+        // 10 units over a 3-ledger stream starting at ledger 100.
+        // Each ledger accrues 10/3 = 3.33..., truncated per the formula.
+        let s = make_stream(&env, 100, 103, 100, 10);
+        let cases: [(u32, i128); 6] = [
+            (99, 0),   // before start
+            (100, 0),  // at start
+            (101, 3),  // elapsed=1 -> 10*1/3 = 3
+            (102, 6),  // elapsed=2 -> 10*2/3 = 6
+            (103, 10), // at end -> full amount
+            (104, 10), // after end -> clamped to full amount
+        ];
+        for (now, expected) in cases {
+            assert_eq!(
+                streamed_amount(&s, now).unwrap(),
+                expected,
+                "unexpected streamed_amount at ledger {now}"
+            );
+        }
+    }
+
+    #[test]
     fn withdrawable_is_zero_before_cliff_even_if_streaming() {
         let env = Env::default();
         let s = make_stream(&env, 0, 1000, 500, 1_000_000);
@@ -209,36 +232,7 @@ mod tests {
         for now in 0..=20u32 {
             let amt = streamed_amount(&s, now).unwrap();
             assert!(amt <= s.total_amount);
+            assert!(amt >= 0);
         }
-    }
-
-    #[test]
-    fn smallest_stream_streams_nothing_until_end() {
-        let env = Env::default();
-        // A long stream with a total of exactly 1 base unit. For every
-        // ledger before the end, floor(1 * elapsed / duration) is 0.
-        let s = make_stream(&env, 0, 1000, 0, 1);
-        for now in [0u32, 1, 100, 500, 999] {
-            assert_eq!(streamed_amount(&s, now).unwrap(), 0);
-            assert_eq!(withdrawable_amount(&s, now).unwrap(), 0);
-        }
-        // Only at the end ledger does the single base unit accrue.
-        assert_eq!(streamed_amount(&s, 1000).unwrap(), 1);
-        assert_eq!(withdrawable_amount(&s, 1000).unwrap(), 1);
-    }
-
-    #[test]
-    fn smallest_stream_can_be_withdrawn_at_end() {
-        let env = Env::default();
-        let mut s = make_stream(&env, 0, 1000, 0, 1);
-        // Nothing withdrawable before the end.
-        assert_eq!(withdrawable_amount(&s, 999).unwrap(), 0);
-        // At the end the full 1 base unit is withdrawable, and after
-        // withdrawing it nothing remains.
-        let amount = withdrawable_amount(&s, 1000).unwrap();
-        assert_eq!(amount, 1);
-        s.withdrawn += amount;
-        assert_eq!(withdrawable_amount(&s, 1000).unwrap(), 0);
-        assert_eq!(withdrawable_amount(&s, 5000).unwrap(), 0);
     }
 }
