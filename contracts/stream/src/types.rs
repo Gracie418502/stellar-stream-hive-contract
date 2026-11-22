@@ -56,3 +56,50 @@ pub struct Stream {
     /// cancellation can never inflate what the recipient is owed.
     pub cancelled_at_ledger: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::compute_status;
+    use soroban_sdk::Env;
+
+    fn stream_with_status(env: &Env, status: StreamStatus) -> Stream {
+        Stream {
+            id: 1,
+            sender: Address::generate(env),
+            recipient: Address::generate(env),
+            token: Address::generate(env),
+            total_amount: 1_000,
+            withdrawn: 0,
+            start_ledger: 100,
+            end_ledger: 200,
+            cliff_ledger: 100,
+            cancellable: true,
+            status,
+            created_at: 50,
+            cancelled_at_ledger: 0,
+        }
+    }
+
+    #[test]
+    fn compute_status_boundaries_for_normal_stream() {
+        let env = Env::default();
+        let stream = stream_with_status(&env, StreamStatus::Pending);
+
+        assert_eq!(compute_status(&stream, 99), StreamStatus::Pending);
+        assert_eq!(compute_status(&stream, 100), StreamStatus::Active);
+        assert_eq!(compute_status(&stream, 199), StreamStatus::Active);
+        assert_eq!(compute_status(&stream, 200), StreamStatus::Completed);
+    }
+
+    #[test]
+    fn compute_status_cancelled_wins_at_every_ledger() {
+        let env = Env::default();
+        let stream = stream_with_status(&env, StreamStatus::Cancelled);
+
+        assert_eq!(compute_status(&stream, 99), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&stream, 100), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&stream, 199), StreamStatus::Cancelled);
+        assert_eq!(compute_status(&stream, 200), StreamStatus::Cancelled);
+    }
+}

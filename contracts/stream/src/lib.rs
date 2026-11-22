@@ -35,6 +35,10 @@ pub struct StreamContract;
 impl StreamContract {
     /// One-time setup. Records the admin and the vault that will custody
     /// every stream created through this contract.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::AlreadyInitialized`: the contract has already been initialized.
     pub fn initialize(env: Env, admin: Address, vault: Address) -> Result<(), StreamError> {
         if storage::has_admin(&env) {
             return Err(StreamError::AlreadyInitialized);
@@ -336,9 +340,60 @@ impl StreamContract {
         recipient: Address,
         offset: u32,
         limit: u32,
-    ) -> Result<Vec<u64>, StreamError> {
-        if limit == 0 || limit > MAX_PAGE_SIZE {
-            return Err(StreamError::InvalidPageSize);
+    ) -> Vec<Stream> {
+        let ids = storage::get_recipient_streams(&env, &recipient);
+        Self::hydrate(&env, &Self::slice(&env, &ids, offset, limit))
+    }
+
+    /// Admin only. Blocks `create_stream` until `unpause` is called.
+    /// Deliberately does NOT block `withdraw`, `withdraw_max` or
+    /// `cancel_stream`: pausing is an emergency brake on new deposits, never
+    /// a way to trap funds that are already streaming.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::NotInitialized`: the contract has not been initialized.
+    pub fn pause(env: Env) -> Result<(), StreamError> {
+        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
+        admin.require_auth();
+        storage::set_paused(&env, true);
+        events::Pause { admin }.publish(&env);
+        Ok(())
+    }
+
+    /// Admin only. Re-enables `create_stream`.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::NotInitialized`: the contract has not been initialized.
+    pub fn unpause(env: Env) -> Result<(), StreamError> {
+        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
+        admin.require_auth();
+        storage::set_paused(&env, false);
+        events::Unpause { admin }.publish(&env);
+        Ok(())
+    }
+
+    /// Whether new stream creation is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        storage::is_paused(&env)
+    }
+
+    /// Admin only. Hands the admin role to `new_admin`. Both the current
+    /// admin and the new admin must authorize, so the role can never be
+    /// transferred to an address nobody controls by mistake.
+    ///
+    /// # Errors
+    ///
+    /// - `StreamError::NotInitialized`: the contract has not been initialized.
+    pub fn transfer_admin(env: Env, new_admin: Address) -> Result<(), StreamError> {
+        let admin = storage::get_admin(&env).ok_or(StreamError::NotInitialized)?;
+        admin.require_auth();
+        new_admin.require_auth();
+        storage::set_admin(&env, &new_admin);
+        events::AdminTransfer {
+            previous_admin: admin,
+            new_admin,
         }
         let all = storage::get_recipient_streams(&env, &recipient);
         Ok(paginate(&all, offset, limit))
