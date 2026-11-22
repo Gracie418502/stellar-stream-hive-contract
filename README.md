@@ -160,14 +160,14 @@ stream type.
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
 
-<!-- handsoff-issue-184 -->
-- #184: Test: `cancel_stream` without the sender's authorization fails
+<!-- handsoff-issue-180 -->
+- #180: Test: a failed `create_stream` does not consume a stream id
 
-<!-- handsoff-issue-185 -->
-- #185: Test: `initialize` requires the admin's authorization
+<!-- handsoff-issue-181 -->
+- #181: Test: a failed `create_stream` leaves no sender or recipient index entries
 
-<!-- handsoff-issue-186 -->
-- #186: Test: the old admin cannot pause after `transfer_admin`
+<!-- handsoff-issue-182 -->
+- #182: Test: `create_stream` without the sender's authorization fails
 
-<!-- handsoff-issue-187 -->
-- #187: Test: pausing twice and unpausing when not paused
+<!-- handsoff-issue-183 -->
+- #183: Test: `withdraw` without the recipient's authorization fails
