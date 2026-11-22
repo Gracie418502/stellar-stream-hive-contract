@@ -159,3 +159,6 @@ stream type.
 
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
+
+<!-- handsoff-issue-189 -->
+- #189: Test: `create_stream` with the same sender and recipient
