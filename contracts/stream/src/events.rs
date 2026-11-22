@@ -3,10 +3,13 @@
 //! interface specification.
 use soroban_sdk::{contractevent, Address};
 
-#[contractevent(data_format = "vec")]
+/// Emitted exactly once per stream, on `create_stream`.
+///
+/// Consumers (e.g. the indexer) assume a single `create` event per stream and
+/// nothing else from the Stream contract; the topic layout is pinned by
+/// `test::create_stream_emits_exactly_one_event`.
+#[contractevent(data_format = "vec", topics = ["create", "stream_id"])]
 pub struct Create {
-    #[topic]
-    pub stream_id: u64,
     pub sender: Address,
     pub recipient: Address,
     pub token: Address,
@@ -47,6 +50,10 @@ pub struct Unpause {
 }
 
 /// Emitted when the admin role is handed to a new address.
+///
+/// This also fires when the admin is transferred to the current admin
+/// (a no-op self-transfer), so tests can assert the event is emitted
+/// even though the stored admin value does not change.
 #[contractevent(data_format = "vec")]
 pub struct AdminTransfer {
     pub previous_admin: Address,

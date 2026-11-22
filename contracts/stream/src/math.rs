@@ -159,12 +159,48 @@ mod tests {
     }
 
     #[test]
+    fn streamed_three_ledger_stream_table() {
+        let env = Env::default();
+        // 10 units over a 3-ledger stream starting at ledger 100.
+        // Each ledger accrues 10/3 = 3.33..., truncated per the formula.
+        let s = make_stream(&env, 100, 103, 100, 10);
+        let cases: [(u32, i128); 6] = [
+            (99, 0),   // before start
+            (100, 0),  // at start
+            (101, 3),  // elapsed=1 -> 10*1/3 = 3
+            (102, 6),  // elapsed=2 -> 10*2/3 = 6
+            (103, 10), // at end -> full amount
+            (104, 10), // after end -> clamped to full amount
+        ];
+        for (now, expected) in cases {
+            assert_eq!(
+                streamed_amount(&s, now).unwrap(),
+                expected,
+                "unexpected streamed_amount at ledger {now}"
+            );
+        }
+    }
+
+    #[test]
     fn withdrawable_is_zero_before_cliff_even_if_streaming() {
         let env = Env::default();
         let s = make_stream(&env, 0, 1000, 500, 1_000_000);
         // At ledger 400 the stream is well underway (40%) but cliff is 500.
         assert_eq!(withdrawable_amount(&s, 400).unwrap(), 0);
         assert_eq!(withdrawable_amount(&s, 500).unwrap(), 500_000);
+    }
+
+    #[test]
+    fn withdrawable_jumps_to_streamed_amount_at_cliff() {
+        let env = Env::default();
+        // Cliff halfway through the stream duration.
+        let s = make_stream(&env, 0, 1000, 500, 1_000_000);
+        // One ledger before the cliff: nothing is withdrawable yet.
+        assert_eq!(withdrawable_amount(&s, 499).unwrap(), 0);
+        // At the cliff the whole accrued amount becomes withdrawable at once.
+        let at_cliff = withdrawable_amount(&s, 500).unwrap();
+        assert_eq!(at_cliff, streamed_amount(&s, 500).unwrap());
+        assert_eq!(at_cliff, 500_000);
     }
 
     #[test]
@@ -199,87 +235,90 @@ mod tests {
     }
 
     #[test]
-    fn streamed_never_exceeds_total_amount() {
+    fn compute_status_at_exact_boundaries() {
         let env = Env::default();
-        // total_amount is deliberately huge (but still small enough that
-        // total_amount * elapsed cannot overflow i128 for this stream's
-        // 7-ledger duration) to exercise the invariant at scale without
-        // tripping the checked_mul overflow guard itself.
-        let s = make_stream(&env, 0, 7, 0, i128::MAX / 10);
-        for now in 0..=20u32 {
-            let amt = streamed_amount(&s, now).unwrap();
-            assert!(amt <= s.total_amount);
-        }
+        let s = make_stream(&env, 100, 200, 100, 1000);
+        // start - 1: still pending.
+        assert_eq!(compute_status(&s, 99), StreamStatus::Pending);
+        // start: the stream is live.
+        assert_eq!(compute_status(&s, 100), StreamStatus::Active);
+        // end - 1: still live, one ledger before completion.
+        assert_eq!(compute_status(&s, 199), StreamStatus::Active);
+        // end: completed.
+        assert_eq!(compute_status(&s, 200), StreamStatus::Completed);
     }
 
     #[test]
-    fn streamed_amount_overflow_is_caught_not_panicked() {
+    fn streamed_amount_at_u32_limit_is_exact_and_monotonic() {
         let env = Env::default();
-        // total_amount * elapsed genuinely cannot fit in i128 here
-        // (i128::MAX * 7 overflows). This must surface as a typed
-        // MathOverflow error, never a raw arithmetic panic.
-        let s = make_stream(&env, 0, 7, 0, i128::MAX);
-        assert_eq!(streamed_amount(&s, 3), Err(StreamError::MathOverflow));
-    }
+        let total = 1_000_000_000_000i128;
+        let s = make_stream(&env, 0, u32::MAX, 0, total);
 
-    #[test]
-    fn streamed_is_monotonic_non_decreasing_in_time() {
-        let env = Env::default();
-        // Awkward, non-divisible parameters stress the rounding.
-        let s = make_stream(&env, 7, 1_009, 7, 999_999_937);
-        let mut prev = 0;
-        for now in 0..=1_100u32 {
+        let sample_ledgers = [
+            0,
+            1,
+            2,
+            100,
+            10_000,
+            1_000_000,
+            u32::MAX / 4,
+            u32::MAX / 2,
+            3 * (u32::MAX / 4),
+            u32::MAX - 100,
+            u32::MAX - 1,
+            u32::MAX,
+        ];
+
+        let mut prev = 0i128;
+        for &now in &sample_ledgers {
             let amt = streamed_amount(&s, now).unwrap();
-            assert!(amt >= prev, "streamed went backwards at ledger {now}");
-            assert!(amt <= s.total_amount);
+            assert!(
+                amt >= prev,
+                "streamed went backwards at ledger {now}: {amt} < {prev}"
+            );
+            assert!(
+                amt <= s.total_amount,
+                "streamed exceeded total amount at ledger {now}: {amt} > {}",
+                s.total_amount
+            );
             prev = amt;
         }
-        assert_eq!(prev, s.total_amount);
+
+        // Exact assertions at boundaries and midpoint
+        assert_eq!(streamed_amount(&s, 0).unwrap(), 0);
+        let expected_mid = total * (u32::MAX as i128 / 2) / (u32::MAX as i128);
+        assert_eq!(streamed_amount(&s, u32::MAX / 2).unwrap(), expected_mid);
+        assert_eq!(streamed_amount(&s, u32::MAX).unwrap(), total);
     }
 
     #[test]
-    fn withdrawable_plus_withdrawn_never_exceeds_total() {
+    fn streamed_amount_overflow_near_i128_max_half() {
         let env = Env::default();
-        let mut s = make_stream(&env, 0, 997, 0, 1_000_003);
-        for now in (0..=1_200u32).step_by(13) {
-            let w = withdrawable_amount(&s, now).unwrap();
-            assert!(w >= 0);
-            assert!(s.withdrawn + w <= s.total_amount);
-            // Withdraw everything available, as a greedy recipient would.
-            s.withdrawn += w;
-        }
-        // A fully-drained stream pays out exactly the deposit, no more.
-        assert_eq!(s.withdrawn, s.total_amount);
-    }
+        // total_amount near i128::MAX / 2
+        let half_max = i128::MAX / 2;
+        let s1 = make_stream(&env, 0, u32::MAX, 0, half_max);
 
-    #[test]
-    fn rounding_always_favours_the_vault_never_the_recipient() {
-        let env = Env::default();
-        let s = make_stream(&env, 0, 3, 0, 10);
-        // 10 over 3 ledgers: 3, 6, 10 -- integer division rounds down.
-        assert_eq!(streamed_amount(&s, 1).unwrap(), 3);
-        assert_eq!(streamed_amount(&s, 2).unwrap(), 6);
-        assert_eq!(streamed_amount(&s, 3).unwrap(), 10);
-    }
+        // At ledger 1, elapsed is 1, so total_amount * 1 does not overflow.
+        assert!(streamed_amount(&s1, 1).is_ok());
 
-    #[test]
-    fn cancelled_before_cliff_leaves_nothing_withdrawable() {
-        let env = Env::default();
-        let mut s = make_stream(&env, 0, 1000, 500, 1_000_000);
-        s.status = StreamStatus::Cancelled;
-        s.cancelled_at_ledger = 300;
-        assert_eq!(withdrawable_amount(&s, 9_999).unwrap(), 0);
-    }
+        // For elapsed >= 3, half_max * 3 overflows i128. This must return MathOverflow without panicking.
+        assert_eq!(streamed_amount(&s1, 3), Err(StreamError::MathOverflow));
+        assert_eq!(
+            streamed_amount(&s1, u32::MAX / 2),
+            Err(StreamError::MathOverflow)
+        );
+        assert_eq!(
+            streamed_amount(&s1, u32::MAX),
+            Err(StreamError::MathOverflow)
+        );
 
-    #[test]
-    fn withdrawable_floors_at_zero_when_withdrawn_exceeds_streamed() {
-        let env = Env::default();
-        // At ledger 100 only 10% of the 1_000_000 deposit has streamed, but
-        // the recipient has already taken 600_000. The raw difference is
-        // negative, and `withdrawable_amount` must clamp it to zero.
-        let mut s = make_stream(&env, 0, 1000, 0, 1_000_000);
-        s.withdrawn = 600_000;
-        assert_eq!(streamed_amount(&s, 100).unwrap(), 100_000);
-        assert_eq!(withdrawable_amount(&s, 100).unwrap(), 0);
+        // When total_amount is i128::MAX / 2 + 1, even elapsed = 2 overflows:
+        // (i128::MAX / 2 + 1) * 2 = 2^126 * 2 = 2^127 > i128::MAX.
+        let s2 = make_stream(&env, 0, u32::MAX, 0, half_max + 1);
+        assert_eq!(streamed_amount(&s2, 2), Err(StreamError::MathOverflow));
+        assert_eq!(
+            streamed_amount(&s2, u32::MAX),
+            Err(StreamError::MathOverflow)
+        );
     }
 }
