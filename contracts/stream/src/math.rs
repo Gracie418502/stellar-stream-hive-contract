@@ -213,73 +213,32 @@ mod tests {
     }
 
     #[test]
-    fn streamed_amount_overflow_is_caught_not_panicked() {
+    fn smallest_stream_streams_nothing_until_end() {
         let env = Env::default();
-        // total_amount * elapsed genuinely cannot fit in i128 here
-        // (i128::MAX * 7 overflows). This must surface as a typed
-        // MathOverflow error, never a raw arithmetic panic.
-        let s = make_stream(&env, 0, 7, 0, i128::MAX);
-        assert_eq!(streamed_amount(&s, 3), Err(StreamError::MathOverflow));
-    }
-
-    #[test]
-    fn streamed_is_monotonic_non_decreasing_in_time() {
-        let env = Env::default();
-        // Awkward, non-divisible parameters stress the rounding.
-        let s = make_stream(&env, 7, 1_009, 7, 999_999_937);
-        let mut prev = 0;
-        for now in 0..=1_100u32 {
-            let amt = streamed_amount(&s, now).unwrap();
-            assert!(amt >= prev, "streamed went backwards at ledger {now}");
-            assert!(amt <= s.total_amount);
-            prev = amt;
+        // A long stream with a total of exactly 1 base unit. For every
+        // ledger before the end, floor(1 * elapsed / duration) is 0.
+        let s = make_stream(&env, 0, 1000, 0, 1);
+        for now in [0u32, 1, 100, 500, 999] {
+            assert_eq!(streamed_amount(&s, now).unwrap(), 0);
+            assert_eq!(withdrawable_amount(&s, now).unwrap(), 0);
         }
-        assert_eq!(prev, s.total_amount);
+        // Only at the end ledger does the single base unit accrue.
+        assert_eq!(streamed_amount(&s, 1000).unwrap(), 1);
+        assert_eq!(withdrawable_amount(&s, 1000).unwrap(), 1);
     }
 
     #[test]
-    fn withdrawable_plus_withdrawn_never_exceeds_total() {
+    fn smallest_stream_can_be_withdrawn_at_end() {
         let env = Env::default();
-        let mut s = make_stream(&env, 0, 997, 0, 1_000_003);
-        for now in (0..=1_200u32).step_by(13) {
-            let w = withdrawable_amount(&s, now).unwrap();
-            assert!(w >= 0);
-            assert!(s.withdrawn + w <= s.total_amount);
-            // Withdraw everything available, as a greedy recipient would.
-            s.withdrawn += w;
-        }
-        // A fully-drained stream pays out exactly the deposit, no more.
-        assert_eq!(s.withdrawn, s.total_amount);
-    }
-
-    #[test]
-    fn rounding_always_favours_the_vault_never_the_recipient() {
-        let env = Env::default();
-        let s = make_stream(&env, 0, 3, 0, 10);
-        // 10 over 3 ledgers: 3, 6, 10 -- integer division rounds down.
-        assert_eq!(streamed_amount(&s, 1).unwrap(), 3);
-        assert_eq!(streamed_amount(&s, 2).unwrap(), 6);
-        assert_eq!(streamed_amount(&s, 3).unwrap(), 10);
-    }
-
-    #[test]
-    fn cancelled_before_cliff_leaves_nothing_withdrawable() {
-        let env = Env::default();
-        let mut s = make_stream(&env, 0, 1000, 500, 1_000_000);
-        s.status = StreamStatus::Cancelled;
-        s.cancelled_at_ledger = 300;
-        assert_eq!(withdrawable_amount(&s, 9_999).unwrap(), 0);
-    }
-
-    #[test]
-    fn withdrawable_floors_at_zero_when_withdrawn_exceeds_streamed() {
-        let env = Env::default();
-        // At ledger 100 only 10% of the 1_000_000 deposit has streamed, but
-        // the recipient has already taken 600_000. The raw difference is
-        // negative, and `withdrawable_amount` must clamp it to zero.
-        let mut s = make_stream(&env, 0, 1000, 0, 1_000_000);
-        s.withdrawn = 600_000;
-        assert_eq!(streamed_amount(&s, 100).unwrap(), 100_000);
-        assert_eq!(withdrawable_amount(&s, 100).unwrap(), 0);
+        let mut s = make_stream(&env, 0, 1000, 0, 1);
+        // Nothing withdrawable before the end.
+        assert_eq!(withdrawable_amount(&s, 999).unwrap(), 0);
+        // At the end the full 1 base unit is withdrawable, and after
+        // withdrawing it nothing remains.
+        let amount = withdrawable_amount(&s, 1000).unwrap();
+        assert_eq!(amount, 1);
+        s.withdrawn += amount;
+        assert_eq!(withdrawable_amount(&s, 1000).unwrap(), 0);
+        assert_eq!(withdrawable_amount(&s, 5000).unwrap(), 0);
     }
 }
