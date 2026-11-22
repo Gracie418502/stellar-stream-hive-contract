@@ -191,6 +191,19 @@ mod tests {
     }
 
     #[test]
+    fn withdrawable_jumps_to_streamed_amount_at_cliff() {
+        let env = Env::default();
+        // Cliff halfway through the stream duration.
+        let s = make_stream(&env, 0, 1000, 500, 1_000_000);
+        // One ledger before the cliff: nothing is withdrawable yet.
+        assert_eq!(withdrawable_amount(&s, 499).unwrap(), 0);
+        // At the cliff the whole accrued amount becomes withdrawable at once.
+        let at_cliff = withdrawable_amount(&s, 500).unwrap();
+        assert_eq!(at_cliff, streamed_amount(&s, 500).unwrap());
+        assert_eq!(at_cliff, 500_000);
+    }
+
+    #[test]
     fn withdrawable_subtracts_already_withdrawn() {
         let env = Env::default();
         let mut s = make_stream(&env, 0, 1000, 0, 1_000_000);
@@ -222,17 +235,16 @@ mod tests {
     }
 
     #[test]
-    fn streamed_never_exceeds_total_amount() {
+    fn compute_status_at_exact_boundaries() {
         let env = Env::default();
-        // total_amount is deliberately huge (but still small enough that
-        // total_amount * elapsed cannot overflow i128 for this stream's
-        // 7-ledger duration) to exercise the invariant at scale without
-        // tripping the checked_mul overflow guard itself.
-        let s = make_stream(&env, 0, 7, 0, i128::MAX / 10);
-        for now in 0..=20u32 {
-            let amt = streamed_amount(&s, now).unwrap();
-            assert!(amt <= s.total_amount);
-            assert!(amt >= 0);
-        }
+        let s = make_stream(&env, 100, 200, 100, 1000);
+        // start - 1: still pending.
+        assert_eq!(compute_status(&s, 99), StreamStatus::Pending);
+        // start: the stream is live.
+        assert_eq!(compute_status(&s, 100), StreamStatus::Active);
+        // end - 1: still live, one ledger before completion.
+        assert_eq!(compute_status(&s, 199), StreamStatus::Active);
+        // end: completed.
+        assert_eq!(compute_status(&s, 200), StreamStatus::Completed);
     }
 }

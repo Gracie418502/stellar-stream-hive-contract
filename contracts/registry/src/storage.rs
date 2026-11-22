@@ -127,3 +127,10 @@ pub fn set_stats(env: &Env, stats: &RegistryStats) {
         .instance()
         .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
 }
+
+/// The TTL (in ledgers) that persistent entries are extended to on write.
+/// Exposed so tests can assert that `register_stream` refreshes the TTL of
+/// the stream record and the index entry.
+pub fn persistent_ttl_bump() -> u32 {
+    LEDGER_BUMP
+}
