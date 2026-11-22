@@ -69,8 +69,12 @@ fn test_deposit_transfers_tokens_into_vault() {
     let depositor = Address::generate(&ctx.env);
     ctx.token_sac.mint(&depositor, &INITIAL_MINT);
 
-    ctx.vault
-        .deposit(&depositor, &ctx.token_address, &DEPOSIT_AMOUNT, &STREAM_ID_ONE);
+    ctx.vault.deposit(
+        &depositor,
+        &ctx.token_address,
+        &DEPOSIT_AMOUNT,
+        &STREAM_ID_ONE,
+    );
 
     assert_eq!(ctx.token.balance(&depositor), INITIAL_MINT - DEPOSIT_AMOUNT);
     assert_eq!(ctx.token.balance(&ctx.vault.address), DEPOSIT_AMOUNT);
