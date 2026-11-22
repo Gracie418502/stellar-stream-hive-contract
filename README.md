@@ -160,11 +160,5 @@ stream type.
 <!-- handsoff-issue-5 -->
 - #5: Assert the exact error in `test_cancel_rejected_after_completion`
 
-<!-- handsoff-issue-200 -->
-- #200: Test: `count_streams_by_recipient` after streams from several senders
-
-<!-- handsoff-issue-201 -->
-- #201: Test: a cancelled stream still appears in the sender and recipient lists
-
-<!-- handsoff-issue-202 -->
-- #202: Test: `streamed_amount` and `withdrawable_amount` return `StreamNotFound` for unknown ids
+<!-- handsoff-issue-189 -->
+- #189: Test: `create_stream` with the same sender and recipient

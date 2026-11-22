@@ -159,6 +159,29 @@ mod tests {
     }
 
     #[test]
+    fn streamed_three_ledger_stream_table() {
+        let env = Env::default();
+        // 10 units over a 3-ledger stream starting at ledger 100.
+        // Each ledger accrues 10/3 = 3.33..., truncated per the formula.
+        let s = make_stream(&env, 100, 103, 100, 10);
+        let cases: [(u32, i128); 6] = [
+            (99, 0),   // before start
+            (100, 0),  // at start
+            (101, 3),  // elapsed=1 -> 10*1/3 = 3
+            (102, 6),  // elapsed=2 -> 10*2/3 = 6
+            (103, 10), // at end -> full amount
+            (104, 10), // after end -> clamped to full amount
+        ];
+        for (now, expected) in cases {
+            assert_eq!(
+                streamed_amount(&s, now).unwrap(),
+                expected,
+                "unexpected streamed_amount at ledger {now}"
+            );
+        }
+    }
+
+    #[test]
     fn withdrawable_is_zero_before_cliff_even_if_streaming() {
         let env = Env::default();
         let s = make_stream(&env, 0, 1000, 500, 1_000_000);
