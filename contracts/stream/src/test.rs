@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate std;
 
 use crate::types::StreamStatus;
 use crate::{StreamContract, StreamContractClient};
@@ -37,6 +38,17 @@ mod mock_vault {
         pub amount: i128,
     }
 
+    /// Mirrors the real vault's `Release` event (same topics and data layout)
+    /// so tests can assert the order of events emitted during `withdraw`.
+    #[contractevent(data_format = "vec")]
+    pub struct Release {
+        #[topic]
+        pub stream_id: u64,
+        pub to: Address,
+        pub token: Address,
+        pub amount: i128,
+    }
+
     #[contract]
     pub struct MockVault;
 
@@ -54,6 +66,21 @@ mod mock_vault {
             env.storage().persistent().set(&key, &(bal + amount));
         }
 
+        fn pay(
+            env: &Env,
+            caller: &Address,
+            to: &Address,
+            token: &Address,
+            amount: i128,
+            stream_id: u64,
+        ) {
+            caller.require_auth();
+            let key = Key::Balance(stream_id);
+            let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(bal - amount));
+            token::Client::new(env, token).transfer(&env.current_contract_address(), to, &amount);
+        }
+
         pub fn release(
             env: Env,
             caller: Address,
@@ -62,15 +89,14 @@ mod mock_vault {
             amount: i128,
             stream_id: u64,
         ) {
-            caller.require_auth();
-            let key = Key::Balance(stream_id);
-            let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-            env.storage().persistent().set(&key, &(bal - amount));
-            token::Client::new(&env, &token).transfer(
-                &env.current_contract_address(),
-                &to,
-                &amount,
-            );
+            Self::pay(&env, &caller, &to, &token, amount, stream_id);
+            Release {
+                stream_id,
+                to,
+                token,
+                amount,
+            }
+            .publish(&env);
         }
 
         pub fn refund(
@@ -83,14 +109,7 @@ mod mock_vault {
         ) {
             // Same order as the real vault: token transfer first, then the
             // vault's own `Refund` event.
-            Self::release(
-                env.clone(),
-                caller,
-                to.clone(),
-                token.clone(),
-                amount,
-                stream_id,
-            );
+            Self::pay(&env, &caller, &to, &token, amount, stream_id);
             Refund {
                 stream_id,
                 to,
@@ -179,6 +198,19 @@ fn create_default_stream(ctx: &TestCtx, cancellable: bool) -> u64 {
         &CLIFF,
         &cancellable,
     )
+}
+
+/// Helper that filters all recorded events by contract address.
+fn contract_events(
+    env: &Env,
+    contract: &Address,
+) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+    use soroban_sdk::testutils::Events as _;
+    env.events()
+        .all()
+        .filter_by_contract(contract)
+        .events()
+        .to_vec()
 }
 
 #[test]
@@ -1548,30 +1580,15 @@ fn test_cancel_event_order_is_transfer_then_vault_refund_then_cancel() {
     let streamed_now = AMOUNT / 2;
     let remainder = AMOUNT - streamed_now;
 
-    // Emission order during `cancel_stream`:
-    //   1. the token contract's `transfer` event (vault -> sender refund),
-    //   2. the vault's `Refund` event,
-    //   3. the stream contract's `Cancel` event, published last, exactly once.
-    let emitted = ctx.env.events().all();
-    let events = emitted.events();
-    assert_eq!(events.len(), 3, "unexpected events: {events:?}");
-
+    // Stream contract must emit Cancel exactly once per call.
+    let stream_events = contract_events(&ctx.env, &ctx.stream.address);
     assert_eq!(
-        emitted.filter_by_contract(&ctx.token_address).events(),
-        &events[..1]
+        stream_events.len(),
+        1,
+        "Stream contract must emit Cancel exactly once"
     );
     assert_eq!(
-        events[1],
-        mock_vault::Refund {
-            stream_id: id,
-            to: ctx.sender.clone(),
-            token: ctx.token_address.clone(),
-            amount: remainder,
-        }
-        .to_xdr(&ctx.env, &ctx.vault.address)
-    );
-    assert_eq!(
-        events[2],
+        stream_events[0],
         events::Cancel {
             stream_id: id,
             sender: ctx.sender.clone(),
@@ -1580,4 +1597,280 @@ fn test_cancel_event_order_is_transfer_then_vault_refund_then_cancel() {
         }
         .to_xdr(&ctx.env, &ctx.stream.address)
     );
+
+    // Vault contract must emit Refund exactly once.
+    let vault_events = contract_events(&ctx.env, &ctx.vault.address);
+    assert_eq!(
+        vault_events.len(),
+        1,
+        "Vault contract must emit Refund exactly once"
+    );
+    assert_eq!(
+        vault_events[0],
+        mock_vault::Refund {
+            stream_id: id,
+            to: ctx.sender.clone(),
+            token: ctx.token_address.clone(),
+            amount: remainder,
+        }
+        .to_xdr(&ctx.env, &ctx.vault.address)
+    );
+
+    // Token contract must emit transfer exactly once.
+    let token_events = contract_events(&ctx.env, &ctx.token_address);
+    assert_eq!(
+        token_events.len(),
+        1,
+        "Token contract must emit transfer exactly once"
+    );
+
+    // Emission order during `cancel_stream`:
+    //   1. the token contract's `transfer` event (vault -> sender refund),
+    //   2. the vault's `Refund` event,
+    //   3. the stream contract's `Cancel` event, published last.
+    let all_emitted = ctx.env.events().all();
+    let all_events = all_emitted.events();
+    assert_eq!(all_events.len(), 3, "unexpected events: {all_events:?}");
+    assert_eq!(all_events[0], token_events[0]);
+    assert_eq!(all_events[1], vault_events[0]);
+    assert_eq!(all_events[2], stream_events[0]);
+}
+
+#[test]
+fn test_withdraw_event_emitted_once_per_contract_in_correct_order() {
+    use crate::events;
+    use soroban_sdk::{testutils::Events as _, Event as _};
+
+    let ctx = setup();
+    let id = create_default_stream(&ctx, true);
+    let midpoint = START + (END - START) / 2;
+    set_ledger(&ctx, midpoint);
+
+    let withdraw_amt = AMOUNT / 4;
+    ctx.stream.withdraw(&ctx.recipient, &id, &withdraw_amt);
+
+    // Stream contract must emit Withdraw exactly once per call.
+    let stream_events = contract_events(&ctx.env, &ctx.stream.address);
+    assert_eq!(
+        stream_events.len(),
+        1,
+        "Stream contract must emit Withdraw exactly once"
+    );
+    assert_eq!(
+        stream_events[0],
+        events::Withdraw {
+            stream_id: id,
+            recipient: ctx.recipient.clone(),
+            amount: withdraw_amt,
+        }
+        .to_xdr(&ctx.env, &ctx.stream.address)
+    );
+
+    // Vault contract must emit Release exactly once.
+    let vault_events = contract_events(&ctx.env, &ctx.vault.address);
+    assert_eq!(
+        vault_events.len(),
+        1,
+        "Vault contract must emit Release exactly once"
+    );
+    assert_eq!(
+        vault_events[0],
+        mock_vault::Release {
+            stream_id: id,
+            to: ctx.recipient.clone(),
+            token: ctx.token_address.clone(),
+            amount: withdraw_amt,
+        }
+        .to_xdr(&ctx.env, &ctx.vault.address)
+    );
+
+    // Token contract must emit transfer exactly once.
+    let token_events = contract_events(&ctx.env, &ctx.token_address);
+    assert_eq!(
+        token_events.len(),
+        1,
+        "Token contract must emit transfer exactly once"
+    );
+
+    // Emission order during `withdraw`:
+    //   1. the token contract's `transfer` event (vault -> recipient payout),
+    //   2. the vault's `Release` event,
+    //   3. the stream contract's `Withdraw` event, published last.
+    let all_emitted = ctx.env.events().all();
+    let all_events = all_emitted.events();
+    assert_eq!(all_events.len(), 3, "unexpected events: {all_events:?}");
+    assert_eq!(all_events[0], token_events[0]);
+    assert_eq!(all_events[1], vault_events[0]);
+    assert_eq!(all_events[2], stream_events[0]);
+}
+
+#[test]
+fn test_get_streams_by_sender_preserves_creation_order_across_many_creates() {
+    let ctx = setup();
+    let recipient_a = ctx.recipient.clone();
+    let recipient_b = Address::generate(&ctx.env);
+    let recipient_c = Address::generate(&ctx.env);
+
+    // Create 5 streams from the same sender with mixed recipients.
+    let id1 = ctx.stream.create_stream(
+        &ctx.sender,
+        &recipient_a,
+        &ctx.token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    let id2 = ctx.stream.create_stream(
+        &ctx.sender,
+        &recipient_b,
+        &ctx.token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &false,
+    );
+    let id3 = ctx.stream.create_stream(
+        &ctx.sender,
+        &recipient_a,
+        &ctx.token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    let id4 = ctx.stream.create_stream(
+        &ctx.sender,
+        &recipient_c,
+        &ctx.token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    let id5 = ctx.stream.create_stream(
+        &ctx.sender,
+        &recipient_b,
+        &ctx.token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &false,
+    );
+
+    assert_eq!([id1, id2, id3, id4, id5], [1, 2, 3, 4, 5]);
+
+    let streams = ctx.stream.get_streams_by_sender(&ctx.sender);
+    assert_eq!(streams.len(), 5);
+    for (i, expected_id) in [1u64, 2, 3, 4, 5].into_iter().enumerate() {
+        assert_eq!(streams.get(i as u32).unwrap().id, expected_id);
+    }
+}
+
+#[test]
+fn test_create_stream_authorization_tree_includes_token_transfer() {
+    use soroban_sdk::testutils::AuthorizedFunction;
+    use soroban_sdk::Symbol;
+
+    let env = Env::default();
+    // Use mock_all_auths_allowing_non_root_auth so nested require_auth calls
+    // in Vault::deposit and Token::transfer are recorded in the authorization tree.
+    env.mock_all_auths_allowing_non_root_auth();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let sac = env.register_stellar_asset_contract_v2(token_admin);
+    let token_address = sac.address();
+    token::StellarAssetClient::new(&env, &token_address).mint(&sender, &(AMOUNT * 10));
+
+    let stream_id = env.register(StreamContract, ());
+    let stream = StreamContractClient::new(&env, &stream_id);
+
+    let vault_id = env.register(MockVault, ());
+    stream.initialize(&admin, &vault_id);
+
+    let created_id = stream.create_stream(
+        &sender,
+        &recipient,
+        &token_address,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    assert_eq!(created_id, 1);
+
+    // Authorization tree for `create_stream`:
+    // When a sender creates a stream, they must authorize the top-level StreamContract
+    // `create_stream` call. During stream creation, the stream contract delegates
+    // token escrow to the vault contract via `deposit`. To pull the tokens into the
+    // vault, the vault invokes `transfer` on the token contract on behalf of `sender`.
+    // The entire invocation tree must be authorized by `sender`:
+    //
+    // sender
+    // └── StreamContract::create_stream(sender, recipient, token, amount, start, end, cliff, cancellable)
+    //     └── Vault::deposit(from: sender, token, amount, stream_id: 1)
+    //         └── Token::transfer(from: sender, to: vault, amount)
+    let auths = env.auths();
+    assert_eq!(
+        auths.len(),
+        1,
+        "expected exactly one root authorization entry for sender"
+    );
+    let (auth_address, root_inv) = &auths[0];
+    assert_eq!(auth_address, &sender);
+
+    // Root invocation: StreamContract::create_stream
+    assert_eq!(
+        root_inv.function,
+        AuthorizedFunction::Contract((
+            stream.address.clone(),
+            Symbol::new(&env, "create_stream"),
+            (
+                sender.clone(),
+                recipient.clone(),
+                token_address.clone(),
+                AMOUNT,
+                START,
+                END,
+                CLIFF,
+                true,
+            )
+                .into_val(&env),
+        ))
+    );
+    assert_eq!(root_inv.sub_invocations.len(), 1);
+
+    // Sub-invocation: Vault::deposit
+    let deposit_inv = &root_inv.sub_invocations[0];
+    assert_eq!(
+        deposit_inv.function,
+        AuthorizedFunction::Contract((
+            vault_id.clone(),
+            Symbol::new(&env, "deposit"),
+            (sender.clone(), token_address.clone(), AMOUNT, 1u64).into_val(&env),
+        ))
+    );
+    assert_eq!(deposit_inv.sub_invocations.len(), 1);
+
+    // Deepest invocation: Token::transfer on the token contract
+    let transfer_inv = &deposit_inv.sub_invocations[0];
+    assert_eq!(
+        transfer_inv.function,
+        AuthorizedFunction::Contract((
+            token_address.clone(),
+            Symbol::new(&env, "transfer"),
+            (sender.clone(), vault_id.clone(), AMOUNT).into_val(&env),
+        ))
+    );
+    assert_eq!(transfer_inv.sub_invocations.len(), 0);
 }

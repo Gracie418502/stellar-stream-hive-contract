@@ -282,4 +282,78 @@ mod tests {
         assert_eq!(streamed_amount(&s, 100).unwrap(), 100_000);
         assert_eq!(withdrawable_amount(&s, 100).unwrap(), 0);
     }
+
+    #[test]
+    fn streamed_amount_at_u32_limit_is_exact_and_monotonic() {
+        let env = Env::default();
+        let total = 1_000_000_000_000i128;
+        let s = make_stream(&env, 0, u32::MAX, 0, total);
+
+        let sample_ledgers = [
+            0,
+            1,
+            2,
+            100,
+            10_000,
+            1_000_000,
+            u32::MAX / 4,
+            u32::MAX / 2,
+            3 * (u32::MAX / 4),
+            u32::MAX - 100,
+            u32::MAX - 1,
+            u32::MAX,
+        ];
+
+        let mut prev = 0i128;
+        for &now in &sample_ledgers {
+            let amt = streamed_amount(&s, now).unwrap();
+            assert!(
+                amt >= prev,
+                "streamed went backwards at ledger {now}: {amt} < {prev}"
+            );
+            assert!(
+                amt <= s.total_amount,
+                "streamed exceeded total amount at ledger {now}: {amt} > {}",
+                s.total_amount
+            );
+            prev = amt;
+        }
+
+        // Exact assertions at boundaries and midpoint
+        assert_eq!(streamed_amount(&s, 0).unwrap(), 0);
+        let expected_mid = total * (u32::MAX as i128 / 2) / (u32::MAX as i128);
+        assert_eq!(streamed_amount(&s, u32::MAX / 2).unwrap(), expected_mid);
+        assert_eq!(streamed_amount(&s, u32::MAX).unwrap(), total);
+    }
+
+    #[test]
+    fn streamed_amount_overflow_near_i128_max_half() {
+        let env = Env::default();
+        // total_amount near i128::MAX / 2
+        let half_max = i128::MAX / 2;
+        let s1 = make_stream(&env, 0, u32::MAX, 0, half_max);
+
+        // At ledger 1, elapsed is 1, so total_amount * 1 does not overflow.
+        assert!(streamed_amount(&s1, 1).is_ok());
+
+        // For elapsed >= 3, half_max * 3 overflows i128. This must return MathOverflow without panicking.
+        assert_eq!(streamed_amount(&s1, 3), Err(StreamError::MathOverflow));
+        assert_eq!(
+            streamed_amount(&s1, u32::MAX / 2),
+            Err(StreamError::MathOverflow)
+        );
+        assert_eq!(
+            streamed_amount(&s1, u32::MAX),
+            Err(StreamError::MathOverflow)
+        );
+
+        // When total_amount is i128::MAX / 2 + 1, even elapsed = 2 overflows:
+        // (i128::MAX / 2 + 1) * 2 = 2^126 * 2 = 2^127 > i128::MAX.
+        let s2 = make_stream(&env, 0, u32::MAX, 0, half_max + 1);
+        assert_eq!(streamed_amount(&s2, 2), Err(StreamError::MathOverflow));
+        assert_eq!(
+            streamed_amount(&s2, u32::MAX),
+            Err(StreamError::MathOverflow)
+        );
+    }
 }
