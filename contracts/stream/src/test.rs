@@ -297,13 +297,15 @@ fn test_withdraw_rejects_zero_amount() {
 }
 
 #[test]
-#[should_panic]
 fn test_withdraw_rejects_amount_exceeding_withdrawable() {
     let ctx = setup();
     let id = create_default_stream(&ctx, true);
     let midpoint = START + (END - START) / 2;
     set_ledger(&ctx, midpoint);
-    ctx.stream.withdraw(&ctx.recipient, &id, &(AMOUNT));
+    assert_eq!(
+        ctx.stream.try_withdraw(&ctx.recipient, &id, &AMOUNT),
+        Err(Ok(StreamError::ExceedsWithdrawable)),
+    );
 }
 
 #[test]
