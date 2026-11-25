@@ -543,10 +543,9 @@ fn test_create_stream_rejects_cliff_after_end() {
 }
 
 #[test]
-#[should_panic]
 fn test_create_stream_rejects_zero_amount() {
     let ctx = setup();
-    ctx.stream.create_stream(
+    let result = ctx.stream.try_create_stream(
         &ctx.sender,
         &ctx.recipient,
         &ctx.token_address,
@@ -556,6 +555,7 @@ fn test_create_stream_rejects_zero_amount() {
         &START,
         &true,
     );
+    assert_eq!(result, Err(Ok(StreamError::InvalidAmount)));
 }
 
 #[test]
