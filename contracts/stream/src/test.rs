@@ -378,6 +378,27 @@ fn test_withdraw_max_unknown_id_returns_stream_not_found() {
 }
 
 #[test]
+fn test_withdraw_max_returns_zero_when_stream_is_fully_drained() {
+    let ctx = setup();
+    let id = create_default_stream(&ctx, true);
+    set_ledger(&ctx, END);
+
+    // First call drains the entire withdrawable balance.
+    let first = ctx.stream.withdraw_max(&ctx.recipient, &id);
+    assert_eq!(first, AMOUNT);
+    assert_eq!(ctx.token.balance(&ctx.recipient), AMOUNT);
+    assert_eq!(ctx.stream.withdrawable_amount(&id), 0);
+
+    // Second call on a fully-drained stream must be a harmless no-op.
+    let balance_before = ctx.token.balance(&ctx.recipient);
+    let vault_before = ctx.vault.balance_of_stream(&id);
+    let second = ctx.stream.withdraw_max(&ctx.recipient, &id);
+    assert_eq!(second, 0);
+    assert_eq!(ctx.token.balance(&ctx.recipient), balance_before);
+    assert_eq!(ctx.vault.balance_of_stream(&id), vault_before);
+}
+
+#[test]
 fn test_withdrawing_full_balance_at_end_leaves_zero_locked() {
     let ctx = setup();
     let id = create_default_stream(&ctx, true);
